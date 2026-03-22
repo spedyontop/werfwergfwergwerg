@@ -1,0 +1,232 @@
+-- =============================================
+-- CROSS-GAME STATE MANAGER
+-- =============================================
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local menuPlaceId = 13901460084
+
+-- File system fallbacks
+local isFile = isfile or function() return false end
+local readFile = readfile or function() return "Farming" end
+local writeFile = writefile or function() end
+
+local stateFileName = "ElementHub_Progression.txt"
+
+local function GetState()
+    if isFile(stateFileName) then return readFile(stateFileName) end
+    return "Farming"
+end
+
+local function SetState(state)
+    writeFile(stateFileName, state)
+end
+
+-- =============================================
+-- PHASE 1: DETENTION PURGATORY
+-- =============================================
+if game.PlaceId ~= menuPlaceId then
+    print("[Element Hub] Loaded into Detention. Waiting for Mash Burnedead...")
+    
+    local live = Workspace:WaitForChild("Live", 9e9)
+    live:WaitForChild("Mash Burnedead", 9e9)
+    
+    print("[Element Hub] Mash spawned! Resetting character...")
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hum = char:WaitForChild("Humanoid", 9e9)
+    hum.Health = 0
+    
+    task.wait(5)
+    
+    print("[Element Hub] Teleporting back to Main Game...")
+    SetState("Farming") 
+    
+    local remotes = ReplicatedStorage:WaitForChild("Remotes", 9e9)
+    remotes:WaitForChild("TeleportPlace"):FireServer(menuPlaceId)
+    
+    return -- End the script completely and wait for the teleport
+end
+
+-- =============================================
+-- PHASE 2: UI & TRIAL LOGIC (Main Game)
+-- =============================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+local TakeQuest = Remotes and Remotes:WaitForChild("TakeQuest")
+local SetupTrainerTrial = Remotes and Remotes:WaitForChild("SetupTrainerTrial")
+local DetentionOption = Remotes and Remotes:WaitForChild("DetentionOption")
+local LiveFolder = Workspace:WaitForChild("Live", 10)
+
+getgenv().spawnTimeout = 3.0
+getgenv().postTrialDelay = 4.0 
+
+local Elements = {
+    "Charm", "Darkness", "Fire", "Graviole", "Ice",
+    "Lightning", "Muscles", "Partisans", "Roks",
+    "Sands", "Sounds", "Spaces", "Timez", "Tornegus", "Waters"
+}
+
+local Window = Rayfield:CreateWindow({
+   Name = "Element Hub",
+   LoadingTitle = "Coordinate TP Fix Applied...",
+   LoadingSubtitle = "by Gemini",
+   ConfigurationSaving = { Enabled = false },
+   KeySystem = false,
+})
+
+-- Helper Functions
+local function GetActiveBoss()
+    for _, model in ipairs(LiveFolder:GetChildren()) do
+        if model:IsA("Model") and model:FindFirstChild("BossTag") then
+            return model
+        end
+    end
+    return nil
+end
+
+local function IsQuestTaken(element)
+    local sideQuests = LocalPlayer:FindFirstChild("Data") and LocalPlayer.Data:FindFirstChild("Quests") and LocalPlayer.Data.Quests:FindFirstChild("SideQuests")
+    if sideQuests and sideQuests:FindFirstChild(element .. " Trial") then
+        local takenVal = sideQuests[element .. " Trial"]:FindFirstChild("QuestTaken")
+        return takenVal and takenVal.Value
+    end
+    return false
+end
+
+local function IsQuestCompleted(element)
+    local sideQuests = LocalPlayer:FindFirstChild("Data") and LocalPlayer.Data:FindFirstChild("Quests") and LocalPlayer.Data.Quests:FindFirstChild("SideQuests")
+    if sideQuests and sideQuests:FindFirstChild(element .. " Trial") then
+        local compVal = sideQuests[element .. " Trial"]:FindFirstChild("QuestCompleted")
+        return compVal and compVal.Value
+    end
+    return false
+end
+
+local function AreAllQuestsCompleted()
+    for _, element in ipairs(Elements) do
+        if not IsQuestCompleted(element) then return false end
+    end
+    return true
+end
+
+-- The GUI
+local MainTab = Window:CreateTab("Auto Trials", 4483362458)
+local StatusLabel = MainTab:CreateLabel("Status: Idle")
+
+if GetState() == "Farming" then
+    getgenv().autoTrial = true
+end
+
+MainTab:CreateToggle({
+   Name = "Auto Do All Trials (Force Reset Flow)",
+   CurrentValue = getgenv().autoTrial, 
+   Flag = "AutoTrial",
+   Callback = function(Value)
+        getgenv().autoTrial = Value
+        
+        if Value then
+            task.spawn(function()
+                while getgenv().autoTrial do
+                    
+                    -- 1. MASTER CHECK: Are we already done?
+                    if AreAllQuestsCompleted() then
+                        StatusLabel:Set("Status: All Trials Complete! Proceeding to Detention...")
+                        SetState("Detention")
+                        
+                        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        
+                        -- STEP A: Physical Coordinate Teleport Fix
+                        if hrp then
+                            hrp.CFrame = CFrame.new(-2666, -130, 2019)
+                            task.wait(0.5) -- Give the server a moment to register the location
+                        end
+                        
+                        -- STEP B: Teleport to Malaggar
+                        local targetNPC = Workspace:FindFirstChild("Interactables")
+                            and Workspace.Interactables:FindFirstChild("NPCS")
+                            and Workspace.Interactables.NPCS:FindFirstChild("Quests")
+                            and Workspace.Interactables.NPCS.Quests:FindFirstChild("MainQuests")
+                            and Workspace.Interactables.NPCS.Quests.MainQuests:FindFirstChild("Ex Headmaster, Malaggar")
+                            
+                        if targetNPC and hrp then
+                            hrp.CFrame = targetNPC:GetPivot()
+                            task.wait(1) 
+                        end
+                        
+                        -- STEP C: Fire Detention
+                        pcall(function() DetentionOption:FireServer() end)
+                        task.wait(20) 
+                        return -- Stop the loop entirely
+                    end
+                    
+                    -- 2. Grab missing quests
+                    StatusLabel:Set("Status: Requesting missing quests...")
+                    for _, element in ipairs(Elements) do
+                        if not getgenv().autoTrial then break end
+                        if not IsQuestTaken(element) and not IsQuestCompleted(element) then
+                            pcall(function() TakeQuest:FireServer(element .. " Trial") end)
+                            task.wait(0.1) 
+                        end
+                    end
+                    task.wait(1) 
+                    
+                    -- 3. Process checklist
+                    for _, element in ipairs(Elements) do
+                        if not getgenv().autoTrial then break end
+                        if IsQuestCompleted(element) then continue end
+                        
+                        -- Setup Trial
+                        StatusLabel:Set("Status: Forcing " .. element .. " boss spawn...")
+                        pcall(function() SetupTrainerTrial:FireServer(element, "Challenge") end)
+                        
+                        -- Check for Spawn
+                        local currentBoss = nil
+                        local timeout = tick() + getgenv().spawnTimeout
+                        while tick() < timeout and getgenv().autoTrial do
+                            currentBoss = GetActiveBoss()
+                            if currentBoss then break end
+                            task.wait(0.2)
+                        end
+                        
+                        -- Wait for Kill & Reset
+                        if currentBoss and getgenv().autoTrial then
+                            StatusLabel:Set("Status: Fighting " .. currentBoss.Name .. "! Waiting for kill...")
+                            while currentBoss.Parent == LiveFolder and getgenv().autoTrial do task.wait(0.5) end
+                            
+                            StatusLabel:Set("Status: " .. element .. " Defeated. Force resetting...")
+                            local char = LocalPlayer.Character
+                            if char and char:FindFirstChild("Humanoid") then
+                                char.Humanoid.Health = 0
+                                
+                                -- Wait for the game to naturally rebuild the character model
+                                LocalPlayer.CharacterAdded:Wait()
+                                
+                                StatusLabel:Set("Status: Respawned. Waiting for map to load...")
+                                task.wait(getgenv().postTrialDelay)
+                            end
+                            
+                            -- Break out of the elements loop to re-evaluate AreAllQuestsCompleted() at the top
+                            break 
+                        end
+                    end
+                end
+                StatusLabel:Set("Status: Idle")
+            end)
+        end
+   end,
+})
+
+-- Settings
+MainTab:CreateSlider({
+   Name = "Boss Spawn Timeout",
+   Range = {1, 10}, Increment = 0.5, Suffix = "s", CurrentValue = 3.0, Flag = "SpawnTimeout",
+   Callback = function(Value) getgenv().spawnTimeout = Value end,
+})
+
+MainTab:CreateSlider({
+   Name = "Post-Respawn Delay",
+   Range = {0, 15}, Increment = 0.5, Suffix = "s", CurrentValue = 4.0, Flag = "PostDelay",
+   Callback = function(Value) getgenv().postTrialDelay = Value end,
+})
