@@ -1,13 +1,23 @@
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
+
+-- =============================================
+-- AUTO RECONNECT (DISCONNECT PROTECTION)
+-- =============================================
+local TeleportService = game:GetService("TeleportService")
+game:GetService("GuiService").ErrorMessageChanged:Connect(function()
+    print("[Gold Farm] Disconnect detected! Rejoining server in 2 seconds...")
+    task.wait(2)
+    TeleportService:Teleport(game.PlaceId)
+end)
+
 -- =============================================
 -- CROSS-GAME STATE MANAGER
 -- =============================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local TeleportService = game:GetService("TeleportService")
 
 -- Bulletproof LocalPlayer fetch
 local LocalPlayer = Players.LocalPlayer
@@ -38,7 +48,7 @@ end
 -- PHASE 1: DETENTION PURGATORY
 -- =============================================
 if game.PlaceId ~= menuPlaceId then
-    print("[Element Hub] Loaded into Detention. Waiting for Mash Burnedead...")
+    print("[Gold Farm] Loaded into Detention. Waiting for Mash Burnedead...")
     
     local live = Workspace:WaitForChild("Live", 9e9)
     
@@ -46,12 +56,12 @@ if game.PlaceId ~= menuPlaceId then
     local mash = live:WaitForChild("Mash Burnedead", 120)
     
     if not mash then
-        print("[Element Hub] ERROR: Mashle failed to spawn. Server hopping...")
+        print("[Gold Farm] ERROR: Mashle failed to spawn. Server hopping...")
         TeleportService:Teleport(game.PlaceId, LocalPlayer)
         return
     end
     
-    print("[Element Hub] Mash spawned! Breaking joints...")
+    print("[Gold Farm] Mash spawned! Breaking joints...")
     local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     
     -- Cleaner Resetting
@@ -59,7 +69,7 @@ if game.PlaceId ~= menuPlaceId then
     
     task.wait(5)
     
-    print("[Element Hub] Teleporting back to Main Game...")
+    print("[Gold Farm] Teleporting back to Main Game...")
     SetState("CharacterCreation") 
     
     local remotes = ReplicatedStorage:WaitForChild("Remotes", 9e9)
@@ -75,7 +85,7 @@ getgenv().autoTrial = false
 local currentState = GetState()
 
 if currentState == "CharacterCreation" then
-    print("[Element Hub] Wiped slot detected. Starting Auto-Character Creation...")
+    print("[Gold Farm] Wiped slot detected. Starting Auto-Character Creation...")
     
     local playerGui = LocalPlayer:WaitForChild("PlayerGui", 9e9)
     local chooseSlotUI = playerGui:WaitForChild("ChooseSlotUI", 9e9)
@@ -83,7 +93,7 @@ if currentState == "CharacterCreation" then
     local chooseSlotRemote = localScript:WaitForChild("ChooseSlot", 9e9)
     
     pcall(function() chooseSlotRemote:FireServer("1") end)
-    print("[Element Hub] Selected Slot 1.")
+    print("[Gold Farm] Selected Slot 1.")
     task.wait(5)
     
     local remotes = ReplicatedStorage:WaitForChild("Remotes", 9e9)
@@ -92,18 +102,18 @@ if currentState == "CharacterCreation" then
     pcall(function() remotes:WaitForChild("PickTrait"):FireServer("Brawn", "One") end)
     task.wait(3)
     pcall(function() remotes:WaitForChild("FinalizeCharacter"):FireServer() end)
-    print("[Element Hub] Character finalized.")
+    print("[Gold Farm] Character finalized.")
     
     task.wait(3)
     
     local closeUI = remotes:WaitForChild("CloseUI", 9e9)
     pcall(function() closeUI:FireServer("CreationUI") end)
-    task.wait(3)
+    task.wait(5)
     pcall(function() closeUI:FireServer("LoadingCharacterUI") end)
-    print("[Element Hub] Forced closed UIs.")
+    print("[Gold Farm] Forced closed UIs.")
     
     task.wait(2)
-    print("[Element Hub] Fixing camera glitch...")
+    print("[Gold Farm] Fixing camera glitch...")
     local camera = workspace.CurrentCamera
     local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local humanoid = char:WaitForChild("Humanoid", 9e9)
@@ -114,7 +124,7 @@ if currentState == "CharacterCreation" then
             camera.CameraSubject = humanoid
             task.wait(0.1)
         end
-        print("[Element Hub] Camera recentered!")
+        print("[Gold Farm] Camera recentered!")
     end
     
     task.wait(3) 
@@ -145,8 +155,8 @@ local Elements = {
 }
 
 local Window = Rayfield:CreateWindow({
-   Name = "Element Hub",
-   LoadingTitle = "Data Fetch Patched...",
+   Name = "Gold Farm",
+   LoadingTitle = "Auto-Reconnect & UI Fix...",
    LoadingSubtitle = "by Gemini",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
@@ -208,7 +218,7 @@ local StatusLabel = MainTab:CreateLabel("Status: Idle")
 
 local AutoTrialToggle = MainTab:CreateToggle({
    Name = "Auto Do All Trials (Force Reset Flow)",
-   CurrentValue = false, -- Initialize OFF so the auto-click registers properly
+   CurrentValue = false, 
    Flag = "AutoTrial",
    Callback = function(Value)
         getgenv().autoTrial = Value
@@ -271,7 +281,7 @@ local AutoTrialToggle = MainTab:CreateToggle({
                             task.wait(0.2)
                         end
                         
-                        -- NEW: HIT AND RUN KITING LOOP
+                        -- HIT AND RUN KITING LOOP
                         if currentBoss and getgenv().autoTrial then
                             StatusLabel:Set("Status: Kiting " .. currentBoss.Name .. "...")
                             
@@ -309,6 +319,13 @@ local AutoTrialToggle = MainTab:CreateToggle({
                             LocalPlayer.CharacterAdded:Wait()
                             StatusLabel:Set("Status: Respawned. Waiting for map to load...")
                             task.wait(getgenv().postTrialDelay)
+                            
+                            -- FORCE CLOSE LOADING UI AFTER RESPAWN
+                            local closeUI = Remotes and Remotes:FindFirstChild("CloseUI")
+                            if closeUI then
+                                pcall(function() closeUI:FireServer("LoadingCharacterUI") end)
+                                print("[Gold Farm] Loading UI closed post-respawn.")
+                            end
                             
                             break 
                         end
