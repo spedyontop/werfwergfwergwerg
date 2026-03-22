@@ -1,11 +1,21 @@
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
 -- =============================================
 -- CROSS-GAME STATE MANAGER
 -- =============================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
 
+-- Bulletproof LocalPlayer fetch
 local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+    task.wait(0.1)
+    LocalPlayer = Players.LocalPlayer
+end
+
 local menuPlaceId = 13901460084
 
 -- File system fallbacks
@@ -31,26 +41,92 @@ if game.PlaceId ~= menuPlaceId then
     print("[Element Hub] Loaded into Detention. Waiting for Mash Burnedead...")
     
     local live = Workspace:WaitForChild("Live", 9e9)
-    live:WaitForChild("Mash Burnedead", 9e9)
     
-    print("[Element Hub] Mash spawned! Resetting character...")
+    -- Mashle Failsafe & Server Hop (120s timeout)
+    local mash = live:WaitForChild("Mash Burnedead", 120)
+    
+    if not mash then
+        print("[Element Hub] ERROR: Mashle failed to spawn. Server hopping...")
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        return
+    end
+    
+    print("[Element Hub] Mash spawned! Breaking joints...")
     local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local hum = char:WaitForChild("Humanoid", 9e9)
-    hum.Health = 0
+    
+    -- Cleaner Resetting
+    if char then char:BreakJoints() end 
     
     task.wait(5)
     
     print("[Element Hub] Teleporting back to Main Game...")
-    SetState("Farming") 
+    SetState("CharacterCreation") 
     
     local remotes = ReplicatedStorage:WaitForChild("Remotes", 9e9)
     remotes:WaitForChild("TeleportPlace"):FireServer(menuPlaceId)
     
-    return -- End the script completely and wait for the teleport
+    return 
 end
 
 -- =============================================
--- PHASE 2: UI & TRIAL LOGIC (Main Game)
+-- PHASE 2: AUTO CHARACTER CREATION
+-- =============================================
+getgenv().autoTrial = false
+local currentState = GetState()
+
+if currentState == "CharacterCreation" then
+    print("[Element Hub] Wiped slot detected. Starting Auto-Character Creation...")
+    
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui", 9e9)
+    local chooseSlotUI = playerGui:WaitForChild("ChooseSlotUI", 9e9)
+    local localScript = chooseSlotUI:WaitForChild("LocalScript", 9e9)
+    local chooseSlotRemote = localScript:WaitForChild("ChooseSlot", 9e9)
+    
+    pcall(function() chooseSlotRemote:FireServer("1") end)
+    print("[Element Hub] Selected Slot 1.")
+    task.wait(5)
+    
+    local remotes = ReplicatedStorage:WaitForChild("Remotes", 9e9)
+    pcall(function() remotes:WaitForChild("PickWeapon"):FireServer("Sword") end)
+    task.wait(1)
+    pcall(function() remotes:WaitForChild("PickTrait"):FireServer("Brawn", "One") end)
+    task.wait(3)
+    pcall(function() remotes:WaitForChild("FinalizeCharacter"):FireServer() end)
+    print("[Element Hub] Character finalized.")
+    
+    task.wait(3)
+    
+    local closeUI = remotes:WaitForChild("CloseUI", 9e9)
+    pcall(function() closeUI:FireServer("CreationUI") end)
+    task.wait(3)
+    pcall(function() closeUI:FireServer("LoadingCharacterUI") end)
+    print("[Element Hub] Forced closed UIs.")
+    
+    task.wait(2)
+    print("[Element Hub] Fixing camera glitch...")
+    local camera = workspace.CurrentCamera
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local humanoid = char:WaitForChild("Humanoid", 9e9)
+    
+    if humanoid then
+        for i = 1, 5 do
+            camera.CameraType = Enum.CameraType.Custom
+            camera.CameraSubject = humanoid
+            task.wait(0.1)
+        end
+        print("[Element Hub] Camera recentered!")
+    end
+    
+    task.wait(3) 
+    
+    SetState("Farming")
+    getgenv().autoTrial = true 
+elseif currentState == "Farming" then
+    getgenv().autoTrial = true
+end
+
+-- =============================================
+-- PHASE 3: UI & TRIAL LOGIC (Main Game)
 -- =============================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
@@ -70,13 +146,15 @@ local Elements = {
 
 local Window = Rayfield:CreateWindow({
    Name = "Element Hub",
-   LoadingTitle = "Coordinate TP Fix Applied...",
+   LoadingTitle = "Data Fetch Patched...",
    LoadingSubtitle = "by Gemini",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
 })
 
--- Helper Functions
+-- =============================================
+-- HELPER FUNCTIONS (OPTIMIZED & CACHED)
+-- =============================================
 local function GetActiveBoss()
     for _, model in ipairs(LiveFolder:GetChildren()) do
         if model:IsA("Model") and model:FindFirstChild("BossTag") then
@@ -86,27 +164,40 @@ local function GetActiveBoss()
     return nil
 end
 
-local function IsQuestTaken(element)
-    local sideQuests = LocalPlayer:FindFirstChild("Data") and LocalPlayer.Data:FindFirstChild("Quests") and LocalPlayer.Data.Quests:FindFirstChild("SideQuests")
-    if sideQuests and sideQuests:FindFirstChild(element .. " Trial") then
-        local takenVal = sideQuests[element .. " Trial"]:FindFirstChild("QuestTaken")
-        return takenVal and takenVal.Value
-    end
-    return false
+local function GetSideQuests()
+    if not LocalPlayer then return nil end
+    
+    local data = LocalPlayer:FindFirstChild("Data")
+    if not data then return nil end
+    
+    local quests = data:FindFirstChild("Quests")
+    if not quests then return nil end
+    
+    return quests:FindFirstChild("SideQuests")
 end
 
-local function IsQuestCompleted(element)
-    local sideQuests = LocalPlayer:FindFirstChild("Data") and LocalPlayer.Data:FindFirstChild("Quests") and LocalPlayer.Data.Quests:FindFirstChild("SideQuests")
-    if sideQuests and sideQuests:FindFirstChild(element .. " Trial") then
-        local compVal = sideQuests[element .. " Trial"]:FindFirstChild("QuestCompleted")
-        return compVal and compVal.Value
-    end
-    return false
+local function IsQuestTaken(sideQuests, element)
+    if not sideQuests then return false end
+    local trialFolder = sideQuests:FindFirstChild(element .. " Trial")
+    if not trialFolder then return false end
+    
+    local takenVal = trialFolder:FindFirstChild("QuestTaken")
+    return takenVal and takenVal.Value or false
 end
 
-local function AreAllQuestsCompleted()
+local function IsQuestCompleted(sideQuests, element)
+    if not sideQuests then return false end
+    local trialFolder = sideQuests:FindFirstChild(element .. " Trial")
+    if not trialFolder then return false end
+    
+    local compVal = trialFolder:FindFirstChild("QuestCompleted")
+    return compVal and compVal.Value or false
+end
+
+local function AreAllQuestsCompleted(sideQuests)
+    if not sideQuests then return false end
     for _, element in ipairs(Elements) do
-        if not IsQuestCompleted(element) then return false end
+        if not IsQuestCompleted(sideQuests, element) then return false end
     end
     return true
 end
@@ -115,13 +206,9 @@ end
 local MainTab = Window:CreateTab("Auto Trials", 4483362458)
 local StatusLabel = MainTab:CreateLabel("Status: Idle")
 
-if GetState() == "Farming" then
-    getgenv().autoTrial = true
-end
-
-MainTab:CreateToggle({
+local AutoTrialToggle = MainTab:CreateToggle({
    Name = "Auto Do All Trials (Force Reset Flow)",
-   CurrentValue = getgenv().autoTrial, 
+   CurrentValue = false, -- Initialize OFF so the auto-click registers properly
    Flag = "AutoTrial",
    Callback = function(Value)
         getgenv().autoTrial = Value
@@ -130,32 +217,26 @@ MainTab:CreateToggle({
             task.spawn(function()
                 while getgenv().autoTrial do
                     
+                    local currentSideQuests = GetSideQuests()
+                    
                     -- 1. MASTER CHECK: Are we already done?
-                    if AreAllQuestsCompleted() then
+                    if currentSideQuests and AreAllQuestsCompleted(currentSideQuests) then
                         StatusLabel:Set("Status: All Trials Complete! Proceeding to Detention...")
                         SetState("Detention")
                         
-                        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        task.wait(2)
                         
-                        -- STEP A: Physical Coordinate Teleport Fix
+                        local char = LocalPlayer.Character
+                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                        
+                        -- Teleport Anti-Cheat Bypass (Anchor logic)
                         if hrp then
-                            hrp.CFrame = CFrame.new(-2666, -130, 2019)
-                            task.wait(0.5) -- Give the server a moment to register the location
+                            hrp.Anchored = true
+                            hrp.CFrame = CFrame.new(-2960, -78, 2622)
+                            task.wait(0.5) 
+                            hrp.Anchored = false
                         end
-                        
-                        -- STEP B: Teleport to Malaggar
-                        local targetNPC = Workspace:FindFirstChild("Interactables")
-                            and Workspace.Interactables:FindFirstChild("NPCS")
-                            and Workspace.Interactables.NPCS:FindFirstChild("Quests")
-                            and Workspace.Interactables.NPCS.Quests:FindFirstChild("MainQuests")
-                            and Workspace.Interactables.NPCS.Quests.MainQuests:FindFirstChild("Ex Headmaster, Malaggar")
-                            
-                        if targetNPC and hrp then
-                            hrp.CFrame = targetNPC:GetPivot()
-                            task.wait(1) 
-                        end
-                        
-                        -- STEP C: Fire Detention
+                        task.wait(3)
                         pcall(function() DetentionOption:FireServer() end)
                         task.wait(20) 
                         return -- Stop the loop entirely
@@ -165,7 +246,7 @@ MainTab:CreateToggle({
                     StatusLabel:Set("Status: Requesting missing quests...")
                     for _, element in ipairs(Elements) do
                         if not getgenv().autoTrial then break end
-                        if not IsQuestTaken(element) and not IsQuestCompleted(element) then
+                        if currentSideQuests and not IsQuestTaken(currentSideQuests, element) and not IsQuestCompleted(currentSideQuests, element) then
                             pcall(function() TakeQuest:FireServer(element .. " Trial") end)
                             task.wait(0.1) 
                         end
@@ -175,13 +256,13 @@ MainTab:CreateToggle({
                     -- 3. Process checklist
                     for _, element in ipairs(Elements) do
                         if not getgenv().autoTrial then break end
-                        if IsQuestCompleted(element) then continue end
                         
-                        -- Setup Trial
+                        currentSideQuests = GetSideQuests() -- Re-cache in case of updates
+                        if currentSideQuests and IsQuestCompleted(currentSideQuests, element) then continue end
+                        
                         StatusLabel:Set("Status: Forcing " .. element .. " boss spawn...")
                         pcall(function() SetupTrainerTrial:FireServer(element, "Challenge") end)
                         
-                        -- Check for Spawn
                         local currentBoss = nil
                         local timeout = tick() + getgenv().spawnTimeout
                         while tick() < timeout and getgenv().autoTrial do
@@ -190,24 +271,45 @@ MainTab:CreateToggle({
                             task.wait(0.2)
                         end
                         
-                        -- Wait for Kill & Reset
+                        -- NEW: HIT AND RUN KITING LOOP
                         if currentBoss and getgenv().autoTrial then
-                            StatusLabel:Set("Status: Fighting " .. currentBoss.Name .. "! Waiting for kill...")
-                            while currentBoss.Parent == LiveFolder and getgenv().autoTrial do task.wait(0.5) end
+                            StatusLabel:Set("Status: Kiting " .. currentBoss.Name .. "...")
                             
-                            StatusLabel:Set("Status: " .. element .. " Defeated. Force resetting...")
+                            local fightTimeout = tick() + 180 
                             local char = LocalPlayer.Character
-                            if char and char:FindFirstChild("Humanoid") then
-                                char.Humanoid.Health = 0
+                            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                            
+                            while currentBoss.Parent == LiveFolder and getgenv().autoTrial do 
+                                if tick() > fightTimeout then
+                                    StatusLabel:Set("Status: Boss glitched/timed out! Forcing reset...")
+                                    break
+                                end
                                 
-                                -- Wait for the game to naturally rebuild the character model
-                                LocalPlayer.CharacterAdded:Wait()
-                                
-                                StatusLabel:Set("Status: Respawned. Waiting for map to load...")
-                                task.wait(getgenv().postTrialDelay)
+                                if hrp then
+                                    -- Teleport TO the boss (slightly in front to hit)
+                                    hrp.CFrame = currentBoss:GetPivot() * CFrame.new(0, 0, -4)
+                                    task.wait(1)
+                                    
+                                    -- Check if boss died during that 1 second wait
+                                    if currentBoss.Parent ~= LiveFolder or not getgenv().autoTrial then break end
+                                    
+                                    -- Teleport AWAY (300 studs straight UP to stay safe)
+                                    hrp.CFrame = currentBoss:GetPivot() * CFrame.new(0, 300, 0)
+                                    task.wait(1)
+                                else
+                                    task.wait(0.5) -- Fallback if your character is missing
+                                end
                             end
                             
-                            -- Break out of the elements loop to re-evaluate AreAllQuestsCompleted() at the top
+                            StatusLabel:Set("Status: " .. element .. " Defeated/Timed Out. Force resetting...")
+                            local current_char = LocalPlayer.Character
+                            
+                            if current_char then current_char:BreakJoints() end
+                            
+                            LocalPlayer.CharacterAdded:Wait()
+                            StatusLabel:Set("Status: Respawned. Waiting for map to load...")
+                            task.wait(getgenv().postTrialDelay)
+                            
                             break 
                         end
                     end
@@ -217,6 +319,11 @@ MainTab:CreateToggle({
         end
    end,
 })
+
+-- PROGRAMMATIC AUTO-START
+if getgenv().autoTrial then
+    AutoTrialToggle:Set(true)
+end
 
 -- Settings
 MainTab:CreateSlider({
