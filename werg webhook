@@ -1,0 +1,362 @@
+-- ==========================================
+-- MASHLE WEBHOOK (STEALTH + OVERFLOW PROOF FIX)
+-- ==========================================
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- Executor HTTP Request Support
+local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+if not httprequest then
+    LocalPlayer:Kick("Your executor does not support HTTP requests.")
+    return
+end
+
+-- ==========================================
+-- CONFIGURATION & SAVING SYSTEM
+-- ==========================================
+local Config = {
+    WebhookURL = "",
+    SendOnTimer = false,
+    TimerInterval = 60,
+    SendOnUpdate = false
+}
+
+local configFileName = "MashleWebhookConfig.json"
+
+local function SaveConfig()
+    if writefile then
+        pcall(function()
+            writefile(configFileName, HttpService:JSONEncode(Config))
+        end)
+    end
+end
+
+local function LoadConfig()
+    if isfile and readfile and isfile(configFileName) then
+        pcall(function()
+            local decoded = HttpService:JSONDecode(readfile(configFileName))
+            if type(decoded) == "table" then
+                for k, v in pairs(decoded) do
+                    Config[k] = v
+                end
+            end
+        end)
+    end
+end
+
+LoadConfig()
+
+local lastUpdateSend = 0
+local updateConnections = {}
+
+local function GetVal(path)
+    if path and typeof(path) == "Instance" and path:IsA("ValueBase") then
+        return tostring(path.Value)
+    elseif path then
+        return tostring(path)
+    end
+    return "N/A"
+end
+
+-- ==========================================
+-- WEBHOOK LOGIC
+-- ==========================================
+local function FireWebhook()
+    if Config.WebhookURL == "" then return end
+
+    local dataFolder = LocalPlayer:FindFirstChild("Data")
+    local slotChosen = LocalPlayer:FindFirstChild("SlotChosen")
+    
+    local coins = dataFolder and dataFolder:FindFirstChild("Coins")
+    local goldCoins = dataFolder and dataFolder:FindFirstChild("GoldCoins")
+    local magicMastery = dataFolder and dataFolder:FindFirstChild("MagicMastery")
+    local magicMark = dataFolder and dataFolder:FindFirstChild("MagicMarkProgression")
+
+    local msg = {
+        ["embeds"] = {
+            {
+                ["title"] = "Mashle Academy Tracker",
+                ["color"] = 2303786, 
+                ["fields"] = {
+                    {
+                        ["name"] = "User",
+                        ["value"] = "||" .. LocalPlayer.Name .. "|| (Slot " .. GetVal(slotChosen) .. ")",
+                        ["inline"] = false
+                    },
+                    {
+                        ["name"] = "Wealth",
+                        ["value"] = "Coins: " .. GetVal(coins) .. "\nGold: " .. GetVal(goldCoins),
+                        ["inline"] = true
+                    },
+                    {
+                        ["name"] = "Magic",
+                        ["value"] = "Mastery: " .. GetVal(magicMastery) .. "\nMark: " .. GetVal(magicMark),
+                        ["inline"] = true
+                    }
+                },
+                ["footer"] = {
+                    ["text"] = "Automated Ping • " .. os.date("%X")
+                }
+            }
+        }
+    }
+
+    pcall(function()
+        httprequest({
+            Url = Config.WebhookURL,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode(msg)
+        })
+    end)
+end
+
+-- ==========================================
+-- LISTENERS & TIMERS
+-- ==========================================
+local function ClearConnections()
+    for _, conn in ipairs(updateConnections) do
+        conn:Disconnect()
+    end
+    updateConnections = {}
+end
+
+local function SetupUpdateListeners()
+    ClearConnections()
+    if not Config.SendOnUpdate then return end
+
+    local dataFolder = LocalPlayer:WaitForChild("Data", 5)
+    if not dataFolder then return end
+
+    local statsToTrack = {"Coins", "GoldCoins", "MagicMastery", "MagicMarkProgression"}
+
+    for _, statName in ipairs(statsToTrack) do
+        local statObj = dataFolder:FindFirstChild(statName)
+        if statObj and statObj:IsA("ValueBase") then
+            local conn = statObj.Changed:Connect(function()
+                if os.clock() - lastUpdateSend >= 3 then
+                    lastUpdateSend = os.clock()
+                    FireWebhook()
+                end
+            end)
+            table.insert(updateConnections, conn)
+        end
+    end
+end
+
+SetupUpdateListeners()
+
+task.spawn(function()
+    while task.wait(1) do
+        if Config.SendOnTimer and Config.TimerInterval > 0 then
+            task.wait(Config.TimerInterval - 1)
+            if Config.SendOnTimer then
+                FireWebhook()
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- MINIMALIST UI CREATION
+-- ==========================================
+local guiName = "MashleStealthGUI"
+if CoreGui:FindFirstChild(guiName) then
+    CoreGui[guiName]:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = guiName
+ScreenGui.Parent = CoreGui
+ScreenGui.ResetOnSpawn = false
+
+-- Keybind to hide/show UI (P key)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.P then
+        ScreenGui.Enabled = not ScreenGui.Enabled
+    end
+end)
+
+-- Main Background
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 220, 0, 260)
+MainFrame.Position = UDim2.new(0.8, 0, 0.6, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+MainFrame.BackgroundTransparency = 0.1
+MainFrame.BorderSizePixel = 1
+MainFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+MainFrame.ClipsDescendants = true -- FIXED: Added the 's'
+MainFrame.Parent = ScreenGui
+
+-- Topbar (For Dragging)
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 20)
+TopBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -10, 1, 0)
+Title.Position = UDim2.new(0, 5, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "WEBHOOK [P to Hide]"
+Title.TextColor3 = Color3.fromRGB(150, 150, 150)
+Title.TextSize = 12
+Title.Font = Enum.Font.Code
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.TextTruncate = Enum.TextTruncate.AtEnd 
+Title.Parent = TopBar
+
+-- Dragging Logic
+local dragging, dragInput, dragStart, startPos
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+TopBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+RunService.Heartbeat:Connect(function()
+    if dragging and dragInput then
+        local delta = dragInput.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- Content Area
+local Content = Instance.new("Frame")
+Content.Size = UDim2.new(1, -16, 1, -28)
+Content.Position = UDim2.new(0, 8, 0, 24)
+Content.BackgroundTransparency = 1
+Content.ClipsDescendants = true -- FIXED: Added the 's'
+Content.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 6)
+UIListLayout.Parent = Content
+
+-- UI Element Generators
+local function CreateLabel(text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 14)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.fromRGB(120, 120, 120)
+    lbl.TextSize = 12
+    lbl.Font = Enum.Font.Code
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextTruncate = Enum.TextTruncate.AtEnd 
+    lbl.Parent = Content
+end
+
+local function CreateTextBox(placeholder, defaultText, callback)
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, 0, 0, 22)
+    box.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+    box.BorderSizePixel = 1
+    box.BorderColor3 = Color3.fromRGB(35, 35, 35)
+    box.PlaceholderText = placeholder
+    box.Text = defaultText
+    box.TextColor3 = Color3.fromRGB(200, 200, 200)
+    box.TextSize = 12
+    box.Font = Enum.Font.Code
+    box.ClearTextOnFocus = false
+    box.TextTruncate = Enum.TextTruncate.AtEnd 
+    box.Parent = Content
+    
+    box.FocusLost:Connect(function()
+        callback(box.Text)
+    end)
+end
+
+local function CreateToggle(text, defaultState, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 22)
+    btn.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+    btn.BorderSizePixel = 1
+    btn.BorderColor3 = Color3.fromRGB(35, 35, 35)
+    btn.Text = (defaultState and "[X] " or "[ ] ") .. text
+    btn.TextColor3 = defaultState and Color3.fromRGB(200, 200, 200) or Color3.fromRGB(150, 150, 150)
+    btn.Font = Enum.Font.Code
+    btn.TextSize = 12
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.TextTruncate = Enum.TextTruncate.AtEnd
+    btn.Parent = Content
+    
+    local UIPadding = Instance.new("UIPadding")
+    UIPadding.PaddingLeft = UDim.new(0, 6)
+    UIPadding.Parent = btn
+
+    local state = defaultState
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.Text = (state and "[X] " or "[ ] ") .. text
+        btn.TextColor3 = state and Color3.fromRGB(200, 200, 200) or Color3.fromRGB(150, 150, 150)
+        callback(state)
+    end)
+end
+
+local function CreateButton(text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 24)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    btn.BorderSizePixel = 1
+    btn.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    btn.Font = Enum.Font.Code
+    btn.TextSize = 12
+    btn.TextTruncate = Enum.TextTruncate.AtEnd
+    btn.Parent = Content
+    
+    btn.MouseButton1Click:Connect(callback)
+end
+
+-- Populate UI with loaded Config values
+CreateLabel("Webhook URL:")
+CreateTextBox("Paste here...", Config.WebhookURL, function(val) 
+    Config.WebhookURL = val 
+    SaveConfig()
+end)
+
+CreateButton("Test Webhook", function() FireWebhook() end)
+
+CreateLabel("Triggers:")
+CreateToggle("On Stat Update", Config.SendOnUpdate, function(val) 
+    Config.SendOnUpdate = val
+    SaveConfig()
+    SetupUpdateListeners()
+end)
+
+CreateToggle("On Timer", Config.SendOnTimer, function(val) 
+    Config.SendOnTimer = val 
+    SaveConfig()
+end)
+
+CreateLabel("Timer Interval (s):")
+CreateTextBox("60", tostring(Config.TimerInterval), function(val) 
+    local num = tonumber(val)
+    if num and num > 0 then
+        Config.TimerInterval = num
+        SaveConfig()
+    end
+end)
