@@ -1,5 +1,5 @@
 -- ==========================================
--- BOUNTY HUNTER AUTOFARM (BOSS TIMEOUT & RELENTLESS LOOT)
+-- BOUNTY HUNTER AUTOFARM (EXACT REMOTE EDITION)
 -- ==========================================
 
 if not game:IsLoaded() then
@@ -199,17 +199,25 @@ end)
 -- ==========================================
 -- MAIN AUTOFARM LOGIC
 -- ==========================================
-local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
-local TakeBounty = Remotes and Remotes:WaitForChild("TakeBounty", 5)
 local LiveFolder = Workspace:WaitForChild("Live", 10)
 local Interactables = Workspace:WaitForChild("Interactables", 10)
 
 local function DoBountyCycle()
-    if not TakeBounty or getgenv().IsResetting then return end
+    if getgenv().IsResetting then return end
 
-    -- 1. Accept Bounty
+    -- 1. Accept Bounty (USING EXACT PROVIDED SNIPPET)
     UpdateStatus("Accepting Bounty...")
-    pcall(function() TakeBounty:FireServer("PVE", getgenv().SelectedBounty) end)
+    pcall(function() 
+        -- Rayfield occasionally wraps selections in tables, this guarantees a clean string for your args
+        local bountyName = type(getgenv().SelectedBounty) == "table" and getgenv().SelectedBounty or getgenv().SelectedBounty
+        
+        local args = {
+            "PVE",
+            tostring(bountyName)
+        }
+        game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("TakeBounty"):FireServer(unpack(args))
+    end)
+    
     task.wait(1)
     if getgenv().IsResetting then return end
 
