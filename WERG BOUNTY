@@ -1,0 +1,330 @@
+-- ==========================================
+-- BOUNTY HUNTER AUTOFARM (ANTI-PLAYER RADAR)
+-- ==========================================
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================
+-- PERMANENT FLOAT & NOCLIP SYSTEM
+-- ==========================================
+local physicsConnection = nil
+
+local function TogglePhysicsOverrides(state)
+    if state then
+        if not physicsConnection then
+            physicsConnection = RunService.Stepped:Connect(function()
+                local char = LocalPlayer.Character
+                if char then
+                    local hrp = char:FindFirstChild("HumanoidRootPart")
+                    
+                    if hrp and not hrp:FindFirstChild("AutofarmFloat") then
+                        local bv = Instance.new("BodyVelocity")
+                        bv.Name = "AutofarmFloat"
+                        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9) 
+                        bv.Velocity = Vector3.new(0, 0, 0)       
+                        bv.Parent = hrp
+                    end
+                    
+                    for _, part in ipairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") and part.CanCollide then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+    else
+        if physicsConnection then
+            physicsConnection:Disconnect()
+            physicsConnection = nil
+        end
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local floatForce = hrp:FindFirstChild("AutofarmFloat")
+            if floatForce then floatForce:Destroy() end
+        end
+    end
+end
+
+-- ==========================================
+-- UI SETUP (RAYFIELD)
+-- ==========================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Bounty Hunter Hub",
+    LoadingTitle = "Anti-Player Edition",
+    LoadingSubtitle = "by Gemini",
+    ConfigurationSaving = { Enabled = false },
+    KeySystem = false,
+})
+
+local MainTab = Window:CreateTab("Auto Bounty", 4483362458)
+
+getgenv().AutoBounty = false
+getgenv().SelectedBounty = "Monster Sighting"
+getgenv().AntiPlayerRadius = 0
+getgenv().IsHiding = false
+
+local StatusLabel = MainTab:CreateLabel("Status: Idle")
+
+MainTab:CreateDropdown({
+    Name = "Select Bounty Type",
+    Options = {"Monster Sighting", "Winter Outbreak"},
+    CurrentOption = {"Monster Sighting"},
+    MultipleOptions = false,
+    Callback = function(Option)
+        getgenv().SelectedBounty = Option
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Anti-Player Hide Radius (0 = Off)",
+    Range = {0, 300},
+    Increment = 10,
+    Suffix = "Studs",
+    CurrentValue = 50,
+    Flag = "AntiPlayerSlider",
+    Callback = function(Value)
+        getgenv().AntiPlayerRadius = Value
+    end,
+})
+
+local function UpdateStatus(text)
+    if getgenv().IsHiding then
+        StatusLabel:Set("Status: HIDING (" .. text .. ")")
+    else
+        StatusLabel:Set("Status: " .. text)
+    end
+end
+
+-- ==========================================
+-- ANTI-PLAYER RADAR LOOP
+-- ==========================================
+task.spawn(function()
+    while task.wait(0.2) do
+        if getgenv().AutoBounty and getgenv().AntiPlayerRadius > 0 then
+            local hiding = false
+            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            
+            if hrp then
+                local myPos = hrp.Position
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer and p.Character then
+                        local targetHrp = p.Character:FindFirstChild("HumanoidRootPart")
+                        if targetHrp then
+                            -- Calculate 2D distance (X, Z) so you don't bounce when underground
+                            local targetPos = targetHrp.Position
+                            local dist = (Vector2.new(myPos.X, myPos.Z) - Vector2.new(targetPos.X, targetPos.Z)).Magnitude
+                            
+                            if dist <= getgenv().AntiPlayerRadius then
+                                hiding = true
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+            getgenv().IsHiding = hiding
+        else
+            getgenv().IsHiding = false
+        end
+    end
+end)
+
+-- ==========================================
+-- HELPER FUNCTIONS
+-- ==========================================
+local function GetHRP()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    return char:FindFirstChild("HumanoidRootPart")
+end
+
+-- Smart Teleport that automatically sinks you 50 studs if a player is near
+local function TeleportTo(cframe)
+    local hrp = GetHRP()
+    if hrp then
+        if getgenv().IsHiding then
+            hrp.CFrame = cframe * CFrame.new(0, -50, 0)
+        else
+            hrp.CFrame = cframe
+        end
+    end
+end
+
+local function ExploitPrompt(prompt)
+    if not prompt or getgenv().IsHiding then return end -- Pause interactions while hiding to avoid server bans
+    pcall(function()
+        prompt.RequiresLineOfSight = false
+        prompt.MaxActivationDistance = 9e9
+        prompt.HoldDuration = 0 
+        
+        if fireproximityprompt then
+            fireproximityprompt(prompt)
+        else
+            prompt:InputHoldBegin()
+            task.wait(0.05)
+            prompt:InputHoldEnd()
+        end
+    end)
+end
+
+local function GetItemPosition(item)
+    if item:IsA("BasePart") then return item.Position end
+    if item:IsA("Model") and item.PrimaryPart then return item.PrimaryPart.Position end
+    if item:IsA("Model") then return item:GetPivot().Position end
+    local firstPart = item:FindFirstChildWhichIsA("BasePart", true)
+    if firstPart then return firstPart.Position end
+    return nil
+end
+
+-- ==========================================
+-- MAIN AUTOFARM LOGIC
+-- ==========================================
+local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+local TakeBounty = Remotes and Remotes:WaitForChild("TakeBounty", 5)
+local LiveFolder = Workspace:WaitForChild("Live", 10)
+local Interactables = Workspace:WaitForChild("Interactables", 10)
+
+local function DoBountyCycle()
+    if not TakeBounty then return UpdateStatus("Error: Remotes missing!") end
+
+    -- 1. Accept Bounty
+    UpdateStatus("Accepting Bounty...")
+    pcall(function() TakeBounty:FireServer("PVE", getgenv().SelectedBounty) end)
+    task.wait(1)
+
+    -- 2. Go to Marker
+    UpdateStatus("Going to Marker...")
+    local marker = Workspace:WaitForChild("MissionMarker", 10)
+    if marker then
+        TeleportTo(marker:IsA("Model") and marker:GetPivot() or marker.CFrame)
+        task.wait(0.5)
+    end
+
+    -- 3. Wait for Boss
+    UpdateStatus("Waiting for Boss...")
+    local targetBoss = nil
+    for i = 1, 100 do
+        if not getgenv().AutoBounty then return end
+        for _, model in ipairs(LiveFolder:GetChildren()) do
+            if model:FindFirstChild("BossTag") then
+                targetBoss = model
+                break
+            end
+        end
+        if targetBoss then break end
+        task.wait(0.1)
+    end
+
+    -- 4. Simple Combat
+    if targetBoss then
+        UpdateStatus("Fighting " .. targetBoss.Name .. "...")
+        while targetBoss.Parent == LiveFolder and targetBoss:FindFirstChild("BossTag") and getgenv().AutoBounty do
+            TeleportTo(targetBoss:GetPivot() * CFrame.new(0, 0, 4))
+            task.wait(0.1) 
+        end
+    end
+
+    -- 5. THE REACTIVE 10-STUD LOOTING
+    UpdateStatus("Waiting for Event Chest...")
+    local chest = Interactables:WaitForChild("Event Chest", 15)
+    
+    if chest then
+        UpdateStatus("Chest found. Exploiting...")
+        local chestPrompt = nil
+        
+        repeat
+            task.wait(0.1)
+            chestPrompt = chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+        until chestPrompt or not chest.Parent or not getgenv().AutoBounty
+
+        local chestEpicenter = GetItemPosition(chest)
+
+        if chestPrompt and chest.Parent and chestEpicenter then
+            local promptPart = chestPrompt.Parent
+            
+            local lootSpawned = false
+            local timeout = os.clock() + 10 
+
+            while not lootSpawned and os.clock() < timeout and getgenv().AutoBounty do
+                -- Smart TP manages surface/underground automatically
+                TeleportTo(promptPart:IsA("BasePart") and promptPart.CFrame or CFrame.new(chestEpicenter))
+                
+                -- Will only fire if we are not hiding
+                ExploitPrompt(chestPrompt)
+                
+                for _, item in ipairs(Interactables:GetChildren()) do
+                    if item ~= chest then
+                        local itemPos = GetItemPosition(item)
+                        if itemPos and (itemPos - chestEpicenter).Magnitude <= 10 then
+                            lootSpawned = true
+                            break
+                        end
+                    end
+                end
+                
+                task.wait(0.1)
+            end
+        end
+
+        UpdateStatus("Drops detected!")
+        task.wait(0.5) 
+
+        if chestEpicenter then
+            for _, item in ipairs(Interactables:GetChildren()) do
+                if item.Name ~= "Event Chest" and getgenv().AutoBounty then
+                    local itemPos = GetItemPosition(item)
+                    
+                    if itemPos and (itemPos - chestEpicenter).Magnitude <= 10 then
+                        local itemPrompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if itemPrompt then
+                            TeleportTo(CFrame.new(itemPos)) 
+                            task.wait(0.1)
+                            ExploitPrompt(itemPrompt)
+                        end
+                    end
+                end
+            end
+        end
+
+        UpdateStatus("Loot secured. Restarting...")
+    else
+        UpdateStatus("No chest spawned. Restarting...")
+    end
+    
+    task.wait(1)
+end
+
+-- ==========================================
+-- TOGGLE EXECUTION
+-- ==========================================
+MainTab:CreateToggle({
+    Name = "Enable Auto Bounty",
+    CurrentValue = false,
+    Flag = "AutoBountyToggle",
+    Callback = function(Value)
+        getgenv().AutoBounty = Value
+        TogglePhysicsOverrides(Value) 
+        
+        if Value then
+            task.spawn(function()
+                while getgenv().AutoBounty do
+                    DoBountyCycle()
+                    task.wait(0.1)
+                end
+                UpdateStatus("Idle")
+            end)
+        end
+    end,
+})
