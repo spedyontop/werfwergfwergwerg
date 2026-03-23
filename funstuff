@@ -1,0 +1,140 @@
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+
+-- cyanide Visual Setup
+Library.AccentColor = Color3.fromHex("#d9003a")
+Library.WindowTitleAlignment = Enum.HorizontalAlignment.Left
+
+local Window = Library:CreateWindow({
+    Title = "cyanide",
+    Center = true,
+    AutoShow = true,
+    Resizable = true,
+    ShowCustomCursor = true,
+})
+
+local MainTab = Window:AddTab("Main", "skull")
+local SettingsTab = Window:AddTab("UI Settings", "settings")
+
+local Remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- =============================================
+-- 1. IDENTITY & APPEARANCE (Left)
+-- =============================================
+local IdentityGroup = MainTab:AddLeftGroupbox("Character & Identity")
+
+IdentityGroup:AddInput("FirstName", {
+    Text = "Change First Name (RISKY)",
+    Default = "...",
+    Callback = function(Value) Remotes.ChangeFirstName:FireServer(Value) end
+})
+
+IdentityGroup:AddDropdown("GenderSelect", {
+    Values = {"Male", "Female"},
+    Default = 1,
+    Text = "Change Gender",
+    Callback = function(Value)
+        Remotes.ChangeGender:FireServer(Value)
+        task.wait(0.2)
+        Remotes.ResetCooldown:FireServer()
+    end
+})
+
+IdentityGroup:AddDropdown("UniformSelect", {
+    Values = {"Standard Uniform", "Suit Uniform", "Mage Uniform", "Brawler Uniform", "Fighter Uniform"},
+    Default = 1,
+    Text = "Select Uniform",
+    Callback = function(Value) Remotes.Closet:FireServer("Outfit", Value) end
+})
+
+IdentityGroup:AddButton("Manual Reset", function() Remotes.ResetCooldown:FireServer() end)
+
+-- =============================================
+-- 2. RACE EXPERIMENTS (Left)
+-- =============================================
+local RaceGroup = MainTab:AddLeftGroupbox("Race Experiments")
+
+RaceGroup:AddDropdown("TargetRace", {
+    Values = {"Ritual Demon", "Turnip", "Scorpion", "Mushroom King", "Minotaur", "Hornet", "Golem", "Frost Drake", "Cobra", "Cactus"},
+    Default = 1,
+    Text = "Experiment Race",
+})
+
+RaceGroup:AddSlider("RaceChance", { Text = "Chance", Default = 100, Min = 1, Max = 100, Rounding = 0 })
+
+RaceGroup:AddButton("Execute Experiment", function()
+    Remotes.ExperimentRace:FireServer(Library.Options.TargetRace.Value, Library.Options.RaceChance.Value)
+end)
+
+-- =============================================
+-- 3. GEAR & EQUIPMENT (Right)
+-- =============================================
+local GearGroup = MainTab:AddRightGroupbox("Equipment")
+
+GearGroup:AddDropdown("WeaponSelect", {
+    Values = {"Fists", "Greatsword", "Gun", "Rapier", "Shield", "Sword", "Wand"},
+    Default = 1,
+    Text = "Pick Weapon (New Slot)",
+    Callback = function(Value) Remotes.PickWeapon:FireServer(Value) end
+})
+
+GearGroup:AddDropdown("BroomSelect", {
+    Values = {"Harley", "Broomstick", "Sleigh", "Asta", "DBZ"},
+    Default = 1,
+    Text = "Select Broom Skin",
+    Callback = function(Value) Remotes.Closet:FireServer("Broom", Value) end
+})
+
+-- =============================================
+-- 4. SERVER UTILITIES (Right)
+-- =============================================
+local ServerGroup = MainTab:AddRightGroupbox("Server")
+
+ServerGroup:AddButton("Rejoin Server", function()
+    game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
+end)
+
+ServerGroup:AddButton("Server Hop", function()
+    local Http = game:GetService("HttpService")
+    local TPS = game:GetService("TeleportService")
+    local Api = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Desc&limit=100"
+    local _Result = Http:JSONDecode(game:HttpGet(Api))
+    if _Result then
+        for _, v in pairs(_Result.data) do
+            if v.playing < v.maxPlayers and v.id ~= game.JobId then
+                TPS:TeleportToPlaceInstance(game.PlaceId, v.id, LocalPlayer)
+                break
+            end
+        end
+    end
+end)
+
+-- =============================================
+-- UI SETTINGS & WATERMARK
+-- =============================================
+local MenuConfig = SettingsTab:AddLeftGroupbox("Menu Settings")
+
+MenuConfig:AddLabel("Menu Keybind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu Keybind" })
+
+Library.ToggleKeybind = Library.Options.MenuKeybind 
+
+MenuConfig:AddToggle("ShowWatermark", {
+    Text = "Show Watermark",
+    Default = true,
+    Callback = function(Value) Library:SetWatermarkVisibility(Value) end
+})
+
+MenuConfig:AddButton("Unload cyanide", function() Library:Unload() end)
+
+-- Watermark Loop
+task.spawn(function()
+    while task.wait(1) do
+        local fps = math.floor(1 / task.wait())
+        local ping = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
+        Library:SetWatermark(("cyanide | FPS: %s | Ping: %sms"):format(fps, ping))
+    end
+end)
+
+Library:Notify({Title = "cyanide loaded", Description = "Press RightShift to hide UI.", Time = 5})
