@@ -1,17 +1,38 @@
 -- ==========================================
--- BOUNTY HUNTER AUTOFARM (EXACT REMOTE EDITION)
+-- BOUNTY HUNTER AUTOFARM (OPTIMIZED EDITION)
 -- ==========================================
 
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
 
+-- ==========================================
+-- CACHED SERVICES & CONSTANTS (Optimization)
+-- ==========================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local TakeBountyRemote = Remotes:WaitForChild("TakeBounty")
+
+local LiveFolder = Workspace:WaitForChild("Live", 10)
+local Interactables = Workspace:WaitForChild("Interactables", 10)
+
+-- ==========================================
+-- GLOBAL VARIABLES
+-- ==========================================
+getgenv().AutoBounty = false
+getgenv().FarmMonster = true
+getgenv().FarmWinter = false
+getgenv().AntiPlayerRadius = 0
+getgenv().IsAborting = false 
+getgenv().IgnoredBosses = {"Frost Drake"} 
+
+local lastBountyDone = "Winter Outbreak" 
 
 -- ==========================================
 -- PERMANENT FLOAT & NOCLIP SYSTEM
@@ -63,61 +84,86 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
     Name = "Bounty Hunter Hub",
-    LoadingTitle = "Timeout & Loot Edition",
+    LoadingTitle = "Optimized Edition",
     LoadingSubtitle = "by Gemini",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
 })
 
 local MainTab = Window:CreateTab("Auto Bounty", 4483362458)
-
-getgenv().AutoBounty = false
-getgenv().SelectedBounty = "Monster Sighting"
-getgenv().AntiPlayerRadius = 0
-getgenv().IsResetting = false
-
 local StatusLabel = MainTab:CreateLabel("Status: Idle")
-
-MainTab:CreateDropdown({
-    Name = "Select Bounty Type",
-    Options = {"Monster Sighting", "Winter Outbreak"},
-    CurrentOption = {"Monster Sighting"},
-    MultipleOptions = false,
-    Callback = function(Option)
-        getgenv().SelectedBounty = Option
-    end,
-})
-
-MainTab:CreateSlider({
-    Name = "Anti-Player Reset Radius (0 = Off)",
-    Range = {0, 5000},
-    Increment = 10,
-    Suffix = "Studs",
-    CurrentValue = 0,
-    Flag = "AntiPlayerSlider",
-    Callback = function(Value)
-        getgenv().AntiPlayerRadius = Value
-    end,
-})
 
 local function UpdateStatus(text)
     StatusLabel:Set("Status: " .. text)
 end
 
+MainTab:CreateToggle({
+    Name = "Farm Monster Sighting",
+    CurrentValue = getgenv().FarmMonster,
+    Flag = "ToggleMonster",
+    Callback = function(Value) getgenv().FarmMonster = Value end,
+})
+
+MainTab:CreateToggle({
+    Name = "Farm Winter Outbreak",
+    CurrentValue = getgenv().FarmWinter,
+    Flag = "ToggleWinter",
+    Callback = function(Value) getgenv().FarmWinter = Value end,
+})
+
+MainTab:CreateDropdown({
+    Name = "Bosses to Skip/Ignore",
+    Options = {"Frost Drake", "Valkyrie", "Golem", "Scorpion", "Minotaur"},
+    CurrentOption = {"Frost Drake"},
+    MultipleOptions = true,
+    Flag = "IgnoreBossesDropdown",
+    Callback = function(Options) getgenv().IgnoredBosses = Options end,
+})
+
+MainTab:CreateSlider({
+    Name = "Anti-Player Abort Radius (0 = Off)",
+    Range = {0, 5000},
+    Increment = 10,
+    Suffix = "Studs",
+    CurrentValue = 0,
+    Flag = "AntiPlayerSlider",
+    Callback = function(Value) getgenv().AntiPlayerRadius = Value end,
+})
+
 -- ==========================================
 -- HELPER FUNCTIONS
 -- ==========================================
+local function GetNextBounty()
+    if getgenv().FarmMonster and getgenv().FarmWinter then
+        lastBountyDone = (lastBountyDone == "Winter Outbreak") and "Monster Sighting" or "Winter Outbreak"
+        return lastBountyDone
+    elseif getgenv().FarmMonster then
+        return "Monster Sighting"
+    elseif getgenv().FarmWinter then
+        return "Winter Outbreak"
+    end
+    return nil 
+end
+
+local function GetHRP()
+    -- Optimized: No longer yields. Returns nil instantly if dead.
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
 
 local function IsPlayerNearPosition(targetPos, radius)
     if radius <= 0 then return false end
+    local radSq = radius * radius -- Optimized: Avoids math.sqrt in the loop
+    
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
             local targetHrp = p.Character:FindFirstChild("HumanoidRootPart")
             local targetHum = p.Character:FindFirstChild("Humanoid")
             
             if targetHrp and targetHum and targetHum.Health > 0 then
-                local dist = (Vector2.new(targetPos.X, targetPos.Z) - Vector2.new(targetHrp.Position.X, targetHrp.Position.Z)).Magnitude
-                if dist <= radius then
+                local dx = targetPos.X - targetHrp.Position.X
+                local dz = targetPos.Z - targetHrp.Position.Z
+                if (dx * dx + dz * dz) <= radSq then
                     return true
                 end
             end
@@ -126,33 +172,101 @@ local function IsPlayerNearPosition(targetPos, radius)
     return false
 end
 
-local function TriggerReset(reason)
-    if getgenv().IsResetting then return end
-    getgenv().IsResetting = true
-    UpdateStatus("Resetting (" .. reason .. ")...")
-    
-    pcall(function()
-        ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ResetCooldown"):FireServer()
-    end)
-    
-    task.wait(5)
-    getgenv().IsResetting = false
-end
-
-local function GetHRP()
-    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    return char:FindFirstChild("HumanoidRootPart")
-end
-
-local function TeleportTo(cframe)
+-- ==========================================
+-- EMERGENCY EVASION & ABORT SYSTEM
+-- ==========================================
+local function EmergencySkyTP()
     local hrp = GetHRP()
-    if hrp and not getgenv().IsResetting then
-        hrp.CFrame = cframe
+    if hrp then
+        hrp.Anchored = true
+        hrp.CFrame = hrp.CFrame + Vector3.new(0, 1000, 0)
+        task.wait(0.05)
+        hrp.Anchored = false
     end
 end
 
+local function AbortBounty(reason)
+    if getgenv().IsAborting then return end
+    getgenv().IsAborting = true
+    UpdateStatus("Aborting (" .. reason .. ")...")
+    
+    local isPlayerEvasion = string.find(reason:lower(), "player")
+    
+    if isPlayerEvasion then
+        EmergencySkyTP()
+        pcall(function() TakeBountyRemote:FireServer("ClearPVE") end)
+        UpdateStatus("Evasively cleared quest. Waiting 2s...")
+        task.wait(2)
+    else
+        pcall(function() TakeBountyRemote:FireServer("ClearPVE") end)
+        EmergencySkyTP()
+        UpdateStatus("Cleared quest. Waiting 2s...")
+        task.wait(2)
+    end
+    
+    getgenv().IsAborting = false
+end
+
+-- ==========================================
+-- STRICT SAFE TELEPORT & TWEEN
+-- ==========================================
+local function SafeTeleport(cframe)
+    if getgenv().IsAborting then return false end
+    
+    if getgenv().AntiPlayerRadius > 0 and IsPlayerNearPosition(cframe.Position, getgenv().AntiPlayerRadius) then
+        task.spawn(function() AbortBounty("Player at teleport destination") end)
+        return false
+    end
+    
+    local hrp = GetHRP()
+    if hrp then
+        hrp.CFrame = cframe
+        return true
+    end
+    return false
+end
+
+local function PlayTweenSafe(tween, duration)
+    tween:Play()
+    local elapsed = 0
+    while elapsed < duration do
+        if getgenv().IsAborting then 
+            tween:Cancel() 
+            return false 
+        end
+        task.wait(0.1)
+        elapsed = elapsed + 0.1
+    end
+    return true
+end
+
+local function SafeTween(hrp, cframe, duration)
+    if not SafeTeleport(cframe) then return false end
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = cframe})
+    return PlayTweenSafe(tween, duration)
+end
+
+-- ==========================================
+-- BACKGROUND RADAR (INSTANT ABORT)
+-- ==========================================
+task.spawn(function()
+    while task.wait(0.1) do
+        if getgenv().AutoBounty and getgenv().AntiPlayerRadius > 0 and not getgenv().IsAborting then
+            local hrp = GetHRP()
+            if hrp and IsPlayerNearPosition(hrp.Position, getgenv().AntiPlayerRadius) then
+                hrp.CFrame = hrp.CFrame + Vector3.new(0, 1000, 0)
+                task.spawn(function() AbortBounty("Player approached us") end)
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- PROMPT EXPLOITER
+-- ==========================================
 local function ExploitPrompt(prompt)
-    if not prompt or getgenv().IsResetting then return end 
+    if not prompt or getgenv().IsAborting then return end 
     pcall(function()
         prompt.RequiresLineOfSight = false
         prompt.MaxActivationDistance = 9e9
@@ -178,68 +292,155 @@ local function GetItemPosition(item)
 end
 
 -- ==========================================
--- ANTI-PLAYER RADAR LOOP (BACKGROUND)
+-- EVENT-LISTENER LOOTING SYSTEM (FAST SWEEP)
 -- ==========================================
-task.spawn(function()
-    while task.wait(0.2) do
-        if getgenv().AutoBounty and getgenv().AntiPlayerRadius > 0 and not getgenv().IsResetting then
-            local char = LocalPlayer.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            local hum = char and char:FindFirstChild("Humanoid")
-            
-            if hrp and hum and hum.Health > 0 then
-                if IsPlayerNearPosition(hrp.Position, getgenv().AntiPlayerRadius) then
-                    TriggerReset("Player got too close")
-                end
+local function DoLooting()
+    UpdateStatus("Waiting for Event Chest...")
+    local chest = Interactables:WaitForChild("Event Chest", 15)
+    
+    if not chest then
+        UpdateStatus("No chest spawned.")
+        return
+    end
+
+    UpdateStatus("Chest found. Setting up listener...")
+    local chestPrompt = nil
+    
+    repeat
+        task.wait(0.1)
+        chestPrompt = chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+    until chestPrompt or not chest.Parent or not getgenv().AutoBounty or getgenv().IsAborting
+    
+    if getgenv().IsAborting or not chest.Parent then return end
+
+    local chestEpicenter = GetItemPosition(chest)
+    if not chestEpicenter then return end
+    
+    local promptPart = chestPrompt.Parent
+    local desiredLootCFrame = promptPart:IsA("BasePart") and promptPart.CFrame or CFrame.new(chestEpicenter)
+
+    local droppedLoot = {}
+    local dropConnection = Interactables.ChildAdded:Connect(function(child)
+        if child.Name ~= "Event Chest" then
+            table.insert(droppedLoot, child)
+        end
+    end)
+
+    local chestTimeout = os.clock() + 10 
+    local lastLootCount = 0
+    local idleTime = 0
+
+    UpdateStatus("Opening Chest...")
+
+    while os.clock() < chestTimeout and getgenv().AutoBounty and not getgenv().IsAborting do
+        local hrp = GetHRP()
+        if hrp and (hrp.Position - desiredLootCFrame.Position).Magnitude > 3 then
+            if not SafeTeleport(desiredLootCFrame) then 
+                dropConnection:Disconnect()
+                return 
             end
         end
+        
+        ExploitPrompt(chestPrompt)
+        
+        if #droppedLoot > 0 then
+            if #droppedLoot == lastLootCount then
+                idleTime = idleTime + 0.1
+                if idleTime >= 1.5 then break end
+            else
+                lastLootCount = #droppedLoot
+                idleTime = 0
+            end
+        end
+        task.wait(0.1)
     end
-end)
+
+    dropConnection:Disconnect()
+    if getgenv().IsAborting then return end
+
+    if #droppedLoot > 0 then
+        UpdateStatus("Sweeping " .. #droppedLoot .. " items rapidly...")
+        task.wait(0.1) 
+
+        local sweepTimeout = os.clock() + 4 
+        local firedPrompts = {} -- Prevent redundant thread creation
+        
+        while os.clock() < sweepTimeout and getgenv().AutoBounty and not getgenv().IsAborting do
+            local itemsRemaining = false
+            
+            for _, item in ipairs(droppedLoot) do
+                if item.Parent == Interactables then
+                    local itemPrompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    
+                    if itemPrompt then
+                        itemsRemaining = true
+                        local itemPos = GetItemPosition(item)
+                        
+                        if itemPos then
+                            local hrp = GetHRP()
+                            if hrp and (hrp.Position - itemPos).Magnitude > 12 then
+                                if not SafeTeleport(CFrame.new(itemPos)) then return end
+                                task.wait(0.05) 
+                            end
+                            
+                            if not firedPrompts[itemPrompt] then
+                                firedPrompts[itemPrompt] = true
+                                task.spawn(function()
+                                    ExploitPrompt(itemPrompt)
+                                    task.wait(0.5)
+                                    firedPrompts[itemPrompt] = nil -- Free it up if it failed
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+            
+            if not itemsRemaining then break end
+            task.wait(0.1) 
+        end
+        UpdateStatus("Loot secured.")
+    else
+        UpdateStatus("Chest opened, but no loot dropped.")
+    end
+end
 
 -- ==========================================
 -- MAIN AUTOFARM LOGIC
 -- ==========================================
-local LiveFolder = Workspace:WaitForChild("Live", 10)
-local Interactables = Workspace:WaitForChild("Interactables", 10)
-
 local function DoBountyCycle()
-    if getgenv().IsResetting then return end
+    if getgenv().IsAborting then return end
 
-    -- 1. Accept Bounty (USING EXACT PROVIDED SNIPPET)
-    UpdateStatus("Accepting Bounty...")
-    pcall(function() 
-        -- Rayfield occasionally wraps selections in tables, this guarantees a clean string for your args
-        local bountyName = type(getgenv().SelectedBounty) == "table" and getgenv().SelectedBounty or getgenv().SelectedBounty
-        
-        local args = {
-            "PVE",
-            tostring(bountyName)
-        }
-        game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("TakeBounty"):FireServer(unpack(args))
-    end)
+    local targetBounty = GetNextBounty()
+    if not targetBounty then
+        UpdateStatus("Waiting: No bounty selected in UI")
+        task.wait(1)
+        return
+    end
+
+    UpdateStatus("Accepting: " .. targetBounty .. "...")
+    pcall(function() TakeBountyRemote:FireServer("PVE", targetBounty) end)
     
-    task.wait(1)
-    if getgenv().IsResetting then return end
+    UpdateStatus("Bounty accepted. Letting server load...")
+    task.wait(3)
+    
+    if getgenv().IsAborting then return end
 
-    -- 2. Go to Marker
     UpdateStatus("Going to Marker...")
-    local marker = Workspace:WaitForChild("MissionMarker", 10)
+    local marker = Workspace:WaitForChild("MissionMarker", 3)
     if marker then
         local markerCFrame = marker:IsA("Model") and marker:GetPivot() or marker.CFrame
-        if IsPlayerNearPosition(markerCFrame.Position, getgenv().AntiPlayerRadius) then
-            TriggerReset("Player camped at Marker")
-            return
+        if SafeTeleport(markerCFrame) then
+            task.wait(0.5)
+            marker:Destroy() 
         end
-        TeleportTo(markerCFrame)
-        task.wait(0.5)
     end
-    if getgenv().IsResetting then return end
+    if getgenv().IsAborting then return end
 
-    -- 3. Wait for Boss
-    UpdateStatus("Waiting for Boss...")
+    UpdateStatus("Waiting for Boss (7s)...")
     local targetBoss = nil
-    for i = 1, 100 do
-        if not getgenv().AutoBounty or getgenv().IsResetting then return end
+    for i = 1, 70 do
+        if not getgenv().AutoBounty or getgenv().IsAborting then return end
         for _, model in ipairs(LiveFolder:GetChildren()) do
             if model:FindFirstChild("BossTag") then
                 targetBoss = model
@@ -249,120 +450,109 @@ local function DoBountyCycle()
         if targetBoss then break end
         task.wait(0.1)
     end
-    if getgenv().IsResetting then return end
+    if getgenv().IsAborting then return end
 
-    -- 4. Simple Combat (WITH 60s TIMEOUT)
+    if not targetBoss then
+        local backupChest = Interactables:FindFirstChild("Event Chest")
+        if backupChest then
+            UpdateStatus("No boss, but chest found! Skipping to loot...")
+        else
+            AbortBounty("Boss timeout & no chest found")
+            return
+        end
+    end
+
+    -- ==========================================
+    -- EXACT BOSS COMBAT LOGIC
+    -- ==========================================
     if targetBoss then
+        local bossName = targetBoss.Name:lower() 
+        
+        local shouldSkip = false
+        for _, ignoredBoss in ipairs(getgenv().IgnoredBosses) do
+            if string.find(bossName, ignoredBoss:lower()) then
+                shouldSkip = true
+                break
+            end
+        end
+        
+        if shouldSkip then
+            AbortBounty("Skipped ignored boss: " .. targetBoss.Name)
+            return
+        end
+        
         UpdateStatus("Fighting " .. targetBoss.Name .. "...")
         local combatStart = os.clock()
         
-        while targetBoss.Parent == LiveFolder and targetBoss:FindFirstChild("BossTag") and getgenv().AutoBounty and not getgenv().IsResetting do
-            -- 60 Second Kill Timeout Check
+        while targetBoss.Parent == LiveFolder and targetBoss:FindFirstChild("BossTag") and getgenv().AutoBounty and not getgenv().IsAborting do
             if os.clock() - combatStart >= 60 then
-                TriggerReset("Boss kill timeout (60s)")
+                AbortBounty("Boss kill timeout (60s)")
                 return
             end
 
-            local bossPos = targetBoss:GetPivot().Position
-            if IsPlayerNearPosition(bossPos, getgenv().AntiPlayerRadius) then
-                TriggerReset("Player near Boss")
-                return
-            end
-            
-            TeleportTo(targetBoss:GetPivot() * CFrame.new(0, 0, 4))
-            task.wait(0.1) 
-        end
-    end
-    if getgenv().IsResetting then return end
-
-    -- 5. THE REACTIVE 10-STUD LOOTING
-    UpdateStatus("Waiting for Event Chest...")
-    local chest = Interactables:WaitForChild("Event Chest", 15)
-    
-    if chest then
-        UpdateStatus("Chest found. Exploiting...")
-        local chestPrompt = nil
-        
-        repeat
-            task.wait(0.1)
-            chestPrompt = chest:FindFirstChildWhichIsA("ProximityPrompt", true)
-        until chestPrompt or not chest.Parent or not getgenv().AutoBounty or getgenv().IsResetting
-        
-        if getgenv().IsResetting then return end
-
-        local chestEpicenter = GetItemPosition(chest)
-
-        if chestPrompt and chest.Parent and chestEpicenter then
-            local promptPart = chestPrompt.Parent
-            if IsPlayerNearPosition(chestEpicenter, getgenv().AntiPlayerRadius) then
-                TriggerReset("Player camping Chest")
-                return
-            end
-            
-            local lootSpawned = false
-            local timeout = os.clock() + 10 
-
-            while not lootSpawned and os.clock() < timeout and getgenv().AutoBounty and not getgenv().IsResetting do
-                TeleportTo(promptPart:IsA("BasePart") and promptPart.CFrame or CFrame.new(chestEpicenter))
-                ExploitPrompt(chestPrompt)
-                
-                for _, item in ipairs(Interactables:GetChildren()) do
-                    if item ~= chest then
-                        local itemPos = GetItemPosition(item)
-                        if itemPos and (itemPos - chestEpicenter).Magnitude <= 10 then
-                            lootSpawned = true
-                            break
-                        end
-                    end
-                end
+            local bossHrp = targetBoss:FindFirstChild("HumanoidRootPart")
+            if not bossHrp then
                 task.wait(0.1)
+                continue
             end
-        end
 
-        if getgenv().IsResetting then return end
-        UpdateStatus("Sweeping drops...")
-        task.wait(0.5) 
-
-        -- RELENTLESS SWEEP: Spam all items in radius until they are physically gone
-        if chestEpicenter then
-            local sweepTimeout = os.clock() + 5 
-            
-            while os.clock() < sweepTimeout and getgenv().AutoBounty and not getgenv().IsResetting do
-                local itemsLeft = false
-                
-                for _, item in ipairs(Interactables:GetChildren()) do
-                    if item.Name ~= "Event Chest" then
-                        local itemPos = GetItemPosition(item)
-                        if itemPos and (itemPos - chestEpicenter).Magnitude <= 10 then
-                            local itemPrompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
-                            if itemPrompt then
-                                itemsLeft = true
-                                TeleportTo(CFrame.new(itemPos)) 
-                                task.wait(0.1)
-                                ExploitPrompt(itemPrompt)
-                            end
-                        end
+            if string.find(bossName, "minotaur") then
+                local hrp = GetHRP()
+                if hrp then
+                    local diagonalCFrame = bossHrp.CFrame * CFrame.new(0, 200, 356.4)
+                    if not SafeTween(hrp, diagonalCFrame, 0.5) then return end
+                    
+                    if targetBoss.Parent == LiveFolder and getgenv().AutoBounty then
+                        local newBackCFrame = bossHrp.CFrame * CFrame.new(0, 0, 10)
+                        if not SafeTween(hrp, newBackCFrame, 0.5) then return end
+                        task.wait(3)
                     end
                 end
+            else
+                local desiredCFrame = bossHrp.CFrame * CFrame.new(0, 0, 4)
+                local hrp = GetHRP()
                 
-                if not itemsLeft then
-                    break -- All items successfully grabbed
+                if hrp then
+                    -- Simplified distance math
+                    local dx = hrp.Position.X - desiredCFrame.Position.X
+                    local dy = hrp.Position.Y - desiredCFrame.Position.Y
+                    local dz = hrp.Position.Z - desiredCFrame.Position.Z
+                    local distSq = (dx*dx + dy*dy + dz*dz)
+                    
+                    if distSq > 225 then -- 15 squared
+                        if not SafeTeleport(desiredCFrame) then return end
+                    else
+                        local smoothTween = TweenService:Create(hrp, TweenInfo.new(0.1, Enum.EasingStyle.Linear), {CFrame = desiredCFrame})
+                        smoothTween:Play()
+                    end
                 end
-                task.wait(0.2)
+                task.wait(0.1) 
             end
         end
-
-        UpdateStatus("Loot secured. Restarting...")
-    else
-        UpdateStatus("No chest spawned. Restarting...")
     end
-    
+    if getgenv().IsAborting then return end
+
+    DoLooting()
+    UpdateStatus("Restarting Cycle...")
     task.wait(1)
 end
 
 -- ==========================================
--- TOGGLE EXECUTION
+-- MAIN TOGGLE EXECUTION & BUTTONS
 -- ==========================================
+MainTab:CreateButton({
+    Name = "Abandon Current Bounty (Manual)",
+    Callback = function()
+        task.spawn(function()
+            if not getgenv().IsAborting then
+                AbortBounty("Manual Abandon")
+            else
+                UpdateStatus("Already aborting...")
+            end
+        end)
+    end,
+})
+
 MainTab:CreateToggle({
     Name = "Enable Auto Bounty",
     CurrentValue = false,
@@ -374,7 +564,7 @@ MainTab:CreateToggle({
         if Value then
             task.spawn(function()
                 while getgenv().AutoBounty do
-                    if not getgenv().IsResetting then
+                    if not getgenv().IsAborting then
                         DoBountyCycle()
                     end
                     task.wait(0.1)
