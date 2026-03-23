@@ -1,5 +1,5 @@
 -- ==========================================
--- BOUNTY HUNTER AUTOFARM (LOOT MAGNET EDITION)
+-- BOUNTY HUNTER AUTOFARM (STEALTH-VACUUM EDITION)
 -- ==========================================
 
 if not game:IsLoaded() then
@@ -82,7 +82,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
     Name = "Auto Bounty :P",
-    LoadingTitle = "Loot Magnet Edition",
+    LoadingTitle = "Stealth-Vacuum Edition",
     LoadingSubtitle = "by gem & cyanide :)",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -136,25 +136,34 @@ local function GetHRP()
     return char and char:FindFirstChild("HumanoidRootPart")
 end
 
-local function GetItemPosition(item)
-    if item:IsA("BasePart") then return item.Position end
-    if item:IsA("Model") and item.PrimaryPart then return item.PrimaryPart.Position end
-    if item:IsA("Model") then return item:GetPivot().Position end
-    local firstPart = item:FindFirstChildWhichIsA("BasePart", true)
-    return firstPart and firstPart.Position or nil
+local function FreezeInPlace(obj)
+    if not obj then return end
+    pcall(function()
+        for _, part in ipairs(obj:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.Velocity = Vector3.new(0,0,0)
+                part.RotVelocity = Vector3.new(0,0,0)
+                part.Anchored = true 
+            end
+        end
+    end)
 end
 
--- NEW: LOOT MAGNET FUNCTION
 local function BringAndFreeze(obj)
     if not obj then return end
     local hrp = GetHRP()
     if not hrp then return end
     
     pcall(function()
-        local targetCF = hrp.CFrame * CFrame.new(0, -2, -5) -- Bring it 5 studs in front of you
+        local targetCF = hrp.CFrame
         
         if obj:IsA("Model") then
             obj:PivotTo(targetCF)
+        elseif obj:IsA("BasePart") then
+            obj.CFrame = targetCF
+            obj.Velocity = Vector3.new(0,0,0)
+            obj.RotVelocity = Vector3.new(0,0,0)
+            obj.Anchored = true 
         end
         
         for _, part in ipairs(obj:GetDescendants()) do
@@ -162,7 +171,7 @@ local function BringAndFreeze(obj)
                 part.Velocity = Vector3.new(0,0,0)
                 part.RotVelocity = Vector3.new(0,0,0)
                 if not obj:IsA("Model") then part.CFrame = targetCF end
-                part.Anchored = true -- Lock it at your position
+                part.Anchored = true 
             end
         end
     end)
@@ -219,21 +228,21 @@ local function SafeTeleport(cframe)
 end
 
 local function SafeTween(hrp, cframe, duration)
-    if not SafeTeleport(cframe) then return false end
-    local tween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = cframe})
+    if getgenv().IsAborting then return false end
+    if getgenv().AntiPlayerRadius > 0 and IsPlayerNearPosition(cframe.Position, getgenv().AntiPlayerRadius) then
+        task.spawn(function() AbortBounty("Player at tween destination") end)
+        return false
+    end
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = cframe})
     tween:Play()
     task.wait(duration)
     return not getgenv().IsAborting
 end
 
--- ==========================================
--- PROMPT EXPLOITER
--- ==========================================
-local function ExploitPrompt(prompt)
+local function FirePrompt(prompt)
     if not prompt or getgenv().IsAborting then return end 
     pcall(function()
-        prompt.RequiresLineOfSight = false
-        prompt.MaxActivationDistance = 9e9
         if fireproximityprompt then
             fireproximityprompt(prompt)
         else
@@ -245,91 +254,93 @@ local function ExploitPrompt(prompt)
 end
 
 -- ==========================================
--- LOOTING SYSTEM (MAGNETIZED)
+-- MULTI-CHEST LOOTING (ITEM-DRIVEN EXIT)
 -- ==========================================
 local function DoLooting()
-    UpdateStatus("Waiting for Event Chest...")
-    local chest = Interactables:WaitForChild("Event Chest", 15)
+    UpdateStatus("Waiting for Event Chest(s)...")
     
-    if not chest then
+    local firstChest = Interactables:WaitForChild("Event Chest", 10)
+    if not firstChest then
         UpdateStatus("No chest spawned.")
         return
     end
 
-    -- MAGNETIZE CHEST TO PLAYER
-    BringAndFreeze(chest)
+    task.wait(0.25) 
 
-    local chestPrompt = nil
-    repeat
-        task.wait(0.1)
-        chestPrompt = chest:FindFirstChildWhichIsA("ProximityPrompt", true)
-    until chestPrompt or not chest.Parent or getgenv().IsAborting
-    
-    if getgenv().IsAborting or not chest.Parent then return end
+    local activeChests = {}
+    for _, item in ipairs(Interactables:GetChildren()) do
+        if item.Name == "Event Chest" then
+            table.insert(activeChests, item)
+            FreezeInPlace(item) 
+        end
+    end
+
+    UpdateStatus("Looting " .. #activeChests .. " Chest(s)...")
 
     local droppedLoot = {}
+    local itemsSpawned = 0
+    local lastDropTime = os.clock() 
+
     local dropConnection = Interactables.ChildAdded:Connect(function(child)
         if child.Name ~= "Event Chest" then
             table.insert(droppedLoot, child)
-            -- MAGNETIZE EACH ITEM AS IT DROPS
+            itemsSpawned = itemsSpawned + 1
+            lastDropTime = os.clock() 
             task.spawn(function()
-                task.wait(0.1) 
+                task.wait() 
                 BringAndFreeze(child)
             end)
         end
     end)
 
-    local chestTimeout = os.clock() + 8 
-    local lastLootCount = 0
-    local idleTime = 0
+    local hrp = GetHRP()
 
-    UpdateStatus("Opening Chest...")
-
-    while os.clock() < chestTimeout and getgenv().AutoBounty and not getgenv().IsAborting do
-        ExploitPrompt(chestPrompt)
+    for _, chest in ipairs(activeChests) do
+        if getgenv().IsAborting then break end
         
-        if #droppedLoot > 0 then
-            if #droppedLoot == lastLootCount then
-                idleTime = idleTime + 0.1
-                if idleTime >= 1.5 then break end
+        local chestPart = chest.PrimaryPart or chest:FindFirstChildWhichIsA("BasePart")
+        if chestPart and hrp then
+            SafeTeleport(chestPart.CFrame * CFrame.new(0, 3, 0))
+        end
+        
+        local chestTimeout = os.clock() + 3
+        while os.clock() < chestTimeout and chest.Parent do
+            local prompt = chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt and prompt.Enabled then
+                FirePrompt(prompt)
             else
-                lastLootCount = #droppedLoot
-                idleTime = 0
+                break 
+            end
+            task.wait(0.1)
+        end
+    end
+
+    local vacuumTimeout = os.clock() + 5 
+    while os.clock() < vacuumTimeout and getgenv().AutoBounty and not getgenv().IsAborting do
+        
+        for _, item in ipairs(droppedLoot) do
+            if item.Parent == Interactables then
+                local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt and prompt.Enabled then
+                    FirePrompt(prompt)
+                end
             end
         end
-        task.wait(0.1)
+        
+        if itemsSpawned > 0 and (os.clock() - lastDropTime > 0.5) then
+            break 
+        end
+        
+        if itemsSpawned == 0 and (os.clock() - (vacuumTimeout - 5) > 2.5) then
+            break
+        end
+        
+        task.wait(0.05) 
     end
 
     dropConnection:Disconnect()
     if getgenv().IsAborting then return end
 
-    if #droppedLoot > 0 then
-        UpdateStatus("Vacuuming " .. #droppedLoot .. " items...")
-        local firedPrompts = {} 
-        local sweepTimeout = os.clock() + 4
-        
-        while os.clock() < sweepTimeout and not getgenv().IsAborting do
-            local itemsRemaining = false
-            for _, item in ipairs(droppedLoot) do
-                if item.Parent == Interactables then
-                    local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if prompt then
-                        itemsRemaining = true
-                        if not firedPrompts[prompt] then
-                            firedPrompts[prompt] = true
-                            task.spawn(function()
-                                ExploitPrompt(prompt)
-                                task.wait(0.5)
-                                firedPrompts[prompt] = nil 
-                            end)
-                        end
-                    end
-                end
-            end
-            if not itemsRemaining then break end
-            task.wait(0.1) 
-        end
-    end
     UpdateStatus("Loot secured.")
 end
 
@@ -361,11 +372,34 @@ local function DoBountyCycle()
     end
 
     if not targetBoss then
+        UpdateStatus("Going to Marker...")
+        
+        -- FIX: Wait for the marker first, then count them
         local marker = Workspace:WaitForChild("MissionMarker", 3)
-        if marker then
-            local markerCFrame = marker:IsA("Model") and marker:GetPivot() or marker.CFrame
-            if SafeTeleport(markerCFrame) then task.wait(0.5) marker:Destroy() end
+        
+        local markers = {}
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            if obj.Name == "MissionMarker" then
+                table.insert(markers, obj)
+            end
         end
+        
+        if #markers > 1 then
+            UpdateStatus("Multiple markers detected! Clearing and restarting...")
+            for _, m in ipairs(markers) do
+                pcall(function() m:Destroy() end)
+            end
+            pcall(function() TakeBountyRemote:FireServer("ClearPVE") end)
+            task.wait(1)
+            return -- Instantly aborts this cycle and triggers a fresh restart
+        elseif marker then
+            local markerCFrame = marker:IsA("Model") and marker:GetPivot() or marker.CFrame
+            if SafeTeleport(markerCFrame) then 
+                task.wait(0.5) 
+                pcall(function() marker:Destroy() end) 
+            end
+        end
+
         for i = 1, 70 do
             if not getgenv().AutoBounty or getgenv().IsAborting then break end
             for _, model in ipairs(LiveFolder:GetChildren()) do
@@ -397,10 +431,14 @@ local function DoBountyCycle()
             if string.find(bossName, "minotaur") then
                 local hrp = GetHRP()
                 if hrp then
-                    if not SafeTween(hrp, bossHrp.CFrame * CFrame.new(0, 200, 356.4), 0.5) then break end
+                    local retreatCF = bossHrp.CFrame * CFrame.new(0, 0, 400)
+                    if not SafeTween(hrp, retreatCF, 0.75) then break end
+                    
                     if targetBoss.Parent == LiveFolder then
-                        SafeTween(hrp, bossHrp.CFrame * CFrame.new(0, 0, 10), 0.5)
-                        task.wait(3)
+                        local attackCF = bossHrp.CFrame * CFrame.new(0, 0, 10)
+                        if not SafeTween(hrp, attackCF, 0.75) then break end
+                        
+                        task.wait(2) 
                     end
                 end
             else
@@ -420,7 +458,7 @@ local function DoBountyCycle()
 
     if not getgenv().IsAborting then DoLooting() end
     UpdateStatus("Restarting Cycle...")
-    task.wait(1)
+    task.wait(0.5)
 end
 
 -- ==========================================
@@ -440,7 +478,7 @@ end)
 
 MainTab:CreateButton({
     Name = "Abandon Current Bounty (Manual)",
-    Callback = function() if not getgenv().IsAborting then AbortBounty("Manual Abandon") end end,
+    Callback = function() if not getgenv().IsAborting then task.spawn(function() AbortBounty("Manual Abandon") end) end end,
 })
 
 MainTab:CreateToggle({
