@@ -90,7 +90,7 @@ MainTab:CreateDropdown({
 
 MainTab:CreateSlider({
     Name = "Anti-Player Reset Radius (0 = Off)",
-    Range = {0, 300},
+    Range = {0, 5000},
     Increment = 10,
     Suffix = "Studs",
     CurrentValue = 0,
