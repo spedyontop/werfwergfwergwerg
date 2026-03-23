@@ -93,7 +93,7 @@ MainTab:CreateSlider({
     Range = {0, 300},
     Increment = 10,
     Suffix = "Studs",
-    CurrentValue = 50,
+    CurrentValue = 150,
     Flag = "AntiPlayerSlider",
     Callback = function(Value)
         getgenv().AntiPlayerRadius = Value
