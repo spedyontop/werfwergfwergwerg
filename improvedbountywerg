@@ -14,6 +14,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -23,7 +24,7 @@ local LiveFolder = Workspace:WaitForChild("Live", 10)
 local Interactables = Workspace:WaitForChild("Interactables", 10)
 
 -- ==========================================
--- GLOBAL VARIABLES
+-- GLOBAL VARIABLES & FILE SAVING
 -- ==========================================
 getgenv().AutoBounty = false
 getgenv().FarmMonster = true
@@ -31,6 +32,13 @@ getgenv().FarmWinter = false
 getgenv().AntiPlayerRadius = 0
 getgenv().IsAborting = false 
 getgenv().IgnoredBosses = {""} 
+getgenv().WebhookURL = ""
+
+if isfile and isfile("BountyHunter_Webhook.txt") then
+    pcall(function()
+        getgenv().WebhookURL = readfile("BountyHunter_Webhook.txt")
+    end)
+end
 
 local lastBountyDone = "Winter Outbreak" 
 
@@ -126,6 +134,20 @@ MainTab:CreateSlider({
     CurrentValue = 0,
     Flag = "AntiPlayerSlider",
     Callback = function(Value) getgenv().AntiPlayerRadius = Value end,
+})
+
+MainTab:CreateInput({
+    Name = "Discord Webhook URL",
+    PlaceholderText = (getgenv().WebhookURL ~= "") and "Webhook Loaded from File" or "Paste Webhook URL here...",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text)
+        getgenv().WebhookURL = Text
+        if writefile then
+            pcall(function()
+                writefile("BountyHunter_Webhook.txt", Text)
+            end)
+        end
+    end,
 })
 
 -- ==========================================
@@ -253,35 +275,74 @@ local function FirePrompt(prompt)
     end)
 end
 
+local function SendWebhook(chestNames, itemNames)
+    local url = getgenv().WebhookURL
+    if not url or url == "" then return end
+
+    local requestFunc = http_request or request or HttpPost or syn.request
+    if not requestFunc then return end
+
+    local chestString = #chestNames > 0 and table.concat(chestNames, ", ") or "None"
+    local itemString = #itemNames > 0 and table.concat(itemNames, ", ") or "None"
+
+    local data = {
+        ["embeds"] = {{
+            ["color"] = tonumber(0x58b9ff),
+            ["description"] = " **Player:** ||" .. LocalPlayer.Name .. "||\n **Chests:** " .. chestString .. "\n **Loot:** " .. itemString
+        }}
+    }
+
+    pcall(function()
+        requestFunc({
+            Url = url,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = HttpService:JSONEncode(data)
+        })
+    end)
+end
+
 -- ==========================================
--- MULTI-CHEST LOOTING (ITEM-DRIVEN EXIT)
+-- MULTI-CHEST LOOTING (UNIVERSAL & PROXIMITY)
 -- ==========================================
 local function DoLooting()
-    UpdateStatus("Waiting for Event Chest(s)...")
-    
-    local firstChest = Interactables:WaitForChild("Event Chest", 10)
-    if not firstChest then
-        UpdateStatus("No chest spawned.")
-        return
-    end
-
-    task.wait(0.25) 
+    UpdateStatus("Waiting for Chest(s)...")
     
     local hrp = GetHRP()
     if not hrp then return end
 
+    local MAX_DISTANCE = 50 
+    local VOID_THRESHOLD = -1500 
+
+    local foundAnyChest = false
+    local waitTimeout = os.clock() + 10
+    while os.clock() < waitTimeout do
+        for _, item in ipairs(Interactables:GetChildren()) do
+            if string.find(item.Name:lower(), "chest") then
+                local chestPart = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+                if chestPart and (chestPart.Position - hrp.Position).Magnitude <= MAX_DISTANCE then
+                    foundAnyChest = true
+                    break
+                end
+            end
+        end
+        if foundAnyChest then break end
+        task.wait(0.25)
+    end
+
+    if not foundAnyChest then
+        UpdateStatus("No chest spawned.")
+        return
+    end
+
     local activeChests = {}
-    local VOID_THRESHOLD = -1500 -- Any chest below this Y value is deleted
-    local MAX_DISTANCE = 500 -- Only chests within 500 studs are looted
 
     for _, item in ipairs(Interactables:GetChildren()) do
-        if item.Name == "Event Chest" then
+        if string.find(item.Name:lower(), "chest") then
             local chestPart = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
             if chestPart then
-                -- Check if it fell into the void/underground
                 if chestPart.Position.Y < VOID_THRESHOLD then
                     item:Destroy()
-                -- Check if it is nearby
                 elseif (chestPart.Position - hrp.Position).Magnitude <= MAX_DISTANCE then
                     table.insert(activeChests, item)
                     FreezeInPlace(item) 
@@ -302,7 +363,7 @@ local function DoLooting()
     local lastDropTime = os.clock() 
 
     local dropConnection = Interactables.ChildAdded:Connect(function(child)
-        if child.Name ~= "Event Chest" then
+        if not string.find(child.Name:lower(), "chest") then
             table.insert(droppedLoot, child)
             itemsSpawned = itemsSpawned + 1
             lastDropTime = os.clock() 
@@ -357,6 +418,21 @@ local function DoLooting()
     end
 
     dropConnection:Disconnect()
+
+    if not getgenv().IsAborting then
+        local loggedChests = {}
+        for _, c in ipairs(activeChests) do
+            table.insert(loggedChests, c.Name)
+        end
+
+        local loggedItems = {}
+        for _, i in ipairs(droppedLoot) do
+            table.insert(loggedItems, i.Name)
+        end
+
+        task.spawn(function() SendWebhook(loggedChests, loggedItems) end)
+    end
+
     if getgenv().IsAborting then return end
 
     UpdateStatus("Loot secured.")
@@ -411,7 +487,7 @@ local function DoBountyCycle()
             return
         elseif marker then
             local markerCFrame = marker:IsA("Model") and marker:GetPivot() or marker.CFrame
-            if SafeTeleport(markerCFrame) then 
+            if SafeTeleport(markerCFrame * CFrame.new(0, -50, 0)) then 
                 task.wait(0.5) 
                 pcall(function() marker:Destroy() end) 
             end
@@ -479,8 +555,24 @@ local function DoBountyCycle()
 end
 
 -- ==========================================
--- UI BUTTONS & BACKGROUND TASKS
+-- BACKGROUND TASKS & CHEST EXPIRATION
 -- ==========================================
+local function HandleChestExpiration(chest)
+    if string.find(chest.Name:lower(), "chest") then
+        task.delay(15, function()
+            if chest and chest.Parent then
+                pcall(function() chest:Destroy() end)
+            end
+        end)
+    end
+end
+
+for _, child in ipairs(Interactables:GetChildren()) do
+    HandleChestExpiration(child)
+end
+
+Interactables.ChildAdded:Connect(HandleChestExpiration)
+
 task.spawn(function()
     while task.wait(0.1) do
         if getgenv().AutoBounty and getgenv().AntiPlayerRadius > 0 and not getgenv().IsAborting then
@@ -493,6 +585,9 @@ task.spawn(function()
     end
 end)
 
+-- ==========================================
+-- UI BUTTONS
+-- ==========================================
 MainTab:CreateButton({
     Name = "Abandon Current Bounty (Manual)",
     Callback = function() if not getgenv().IsAborting then task.spawn(function() AbortBounty("Manual Abandon") end) end end,
