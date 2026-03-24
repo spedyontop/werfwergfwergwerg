@@ -33,6 +33,7 @@ getgenv().AntiPlayerRadius = 0
 getgenv().IsAborting = false 
 getgenv().IgnoredBosses = {""} 
 getgenv().WebhookURL = ""
+getgenv().AutoUseCoins = false -- Added for Coin Auto-User
 
 if isfile and isfile("BountyHunter_Webhook.txt") then
     pcall(function()
@@ -89,8 +90,8 @@ end
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Auto Bounty :P",
-    LoadingTitle = "Stealth-Vacuum Edition",
+    Name = "Auto Bounty",
+    LoadingTitle = "Cyanide's Auto Bounty",
     LoadingSubtitle = "by gem & cyanide :)",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -283,12 +284,38 @@ local function SendWebhook(chestNames, itemNames)
     if not requestFunc then return end
 
     local chestString = #chestNames > 0 and table.concat(chestNames, ", ") or "None"
-    local itemString = #itemNames > 0 and table.concat(itemNames, ", ") or "None"
+    local itemString = #itemNames > 0 and table.concat(itemNames, "\n") or "None"
+
+    -- Safely grab the coin values for the local player
+    local coins = 0
+    local goldCoins = 0
+    pcall(function()
+        local data = LocalPlayer:FindFirstChild("Data")
+        if data then
+            local c = data:FindFirstChild("Coins")
+            local gc = data:FindFirstChild("GoldCoins")
+            -- Assuming these are Value objects (like IntValue or NumberValue)
+            if c then coins = c.Value end
+            if gc then goldCoins = gc.Value end
+        end
+    end)
 
     local data = {
         ["embeds"] = {{
-            ["color"] = tonumber(0x58b9ff),
-            ["description"] = "👤 **Player:** ||" .. LocalPlayer.Name .. "||\n📦 **Chests:** " .. chestString .. "\n💎 **Loot:** " .. itemString
+            ["title"] = "Cyanide's Auto Bounty",
+            ["color"] = tonumber(0x287121),
+            ["description"] = "**Player:** ||" .. LocalPlayer.Name .. "||\n**Coins:** " .. tostring(coins) .. " | **Gold Coins:** " .. tostring(goldCoins),
+            ["fields"] = {
+                {
+                    ["name"] = "\226\128\139", -- Invisible Zero-Width Space to hide the title
+                    ["value"] = "**Looted from [" .. chestString .. "]:**\n" .. itemString,
+                    ["inline"] = false
+                }
+            },
+            ["footer"] = {
+                ["text"] = "Made by cyanide underground w/ gem",
+                ["icon_url"] = "https://i.imgur.com/DI8Les9.png"
+            }
         }}
     }
 
@@ -589,7 +616,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- UI BUTTONS
+-- UI BUTTONS & TOGGLES
 -- ==========================================
 MainTab:CreateButton({
     Name = "Abandon Current Bounty (Manual)",
@@ -610,6 +637,45 @@ MainTab:CreateToggle({
                     task.wait(0.1)
                 end
                 UpdateStatus("Idle")
+            end)
+        end
+    end,
+})
+
+-- THE NEW COIN AUTO-USER TOGGLE
+MainTab:CreateToggle({
+    Name = "Enable Auto-Use Coins",
+    CurrentValue = false,
+    Flag = "AutoCoinsToggle",
+    Callback = function(Value)
+        getgenv().AutoUseCoins = Value
+        if Value then
+            task.spawn(function()
+                local TargetItems = {
+                    ["Golden Coin"] = true,
+                    ["Lost Coins"] = true
+                }
+                while getgenv().AutoUseCoins do
+                    pcall(function()
+                        local character = LocalPlayer.Character
+                        local backpack = LocalPlayer:FindFirstChild("Backpack")
+                        
+                        if character and backpack then
+                            local humanoid = character:FindFirstChildOfClass("Humanoid")
+                            if humanoid then
+                                for _, item in ipairs(backpack:GetChildren()) do
+                                    if item:IsA("Tool") and TargetItems[item.Name] then
+                                        humanoid:EquipTool(item)
+                                        task.wait(0.1) 
+                                        item:Activate()
+                                        task.wait(0.2) 
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                    task.wait(0.5)
+                end
             end)
         end
     end,
