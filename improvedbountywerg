@@ -266,13 +266,33 @@ local function DoLooting()
     end
 
     task.wait(0.25) 
+    
+    local hrp = GetHRP()
+    if not hrp then return end
 
     local activeChests = {}
+    local VOID_THRESHOLD = -1500 -- Any chest below this Y value is deleted
+    local MAX_DISTANCE = 500 -- Only chests within 500 studs are looted
+
     for _, item in ipairs(Interactables:GetChildren()) do
         if item.Name == "Event Chest" then
-            table.insert(activeChests, item)
-            FreezeInPlace(item) 
+            local chestPart = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+            if chestPart then
+                -- Check if it fell into the void/underground
+                if chestPart.Position.Y < VOID_THRESHOLD then
+                    item:Destroy()
+                -- Check if it is nearby
+                elseif (chestPart.Position - hrp.Position).Magnitude <= MAX_DISTANCE then
+                    table.insert(activeChests, item)
+                    FreezeInPlace(item) 
+                end
+            end
         end
+    end
+
+    if #activeChests == 0 then
+        UpdateStatus("No valid chests found nearby.")
+        return
     end
 
     UpdateStatus("Looting " .. #activeChests .. " Chest(s)...")
@@ -292,8 +312,6 @@ local function DoLooting()
             end)
         end
     end)
-
-    local hrp = GetHRP()
 
     for _, chest in ipairs(activeChests) do
         if getgenv().IsAborting then break end
@@ -374,7 +392,6 @@ local function DoBountyCycle()
     if not targetBoss then
         UpdateStatus("Going to Marker...")
         
-        -- FIX: Wait for the marker first, then count them
         local marker = Workspace:WaitForChild("MissionMarker", 3)
         
         local markers = {}
@@ -391,7 +408,7 @@ local function DoBountyCycle()
             end
             pcall(function() TakeBountyRemote:FireServer("ClearPVE") end)
             task.wait(1)
-            return -- Instantly aborts this cycle and triggers a fresh restart
+            return
         elseif marker then
             local markerCFrame = marker:IsA("Model") and marker:GetPivot() or marker.CFrame
             if SafeTeleport(markerCFrame) then 
