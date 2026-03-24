@@ -288,7 +288,7 @@ local function SendWebhook(chestNames, itemNames)
     local data = {
         ["embeds"] = {{
             ["color"] = tonumber(0x58b9ff),
-            ["description"] = " **Player:** ||" .. LocalPlayer.Name .. "||\n **Chests:** " .. chestString .. "\n **Loot:** " .. itemString
+            ["description"] = "👤 **Player:** ||" .. LocalPlayer.Name .. "||\n📦 **Chests:** " .. chestString .. "\n💎 **Loot:** " .. itemString
         }}
     }
 
@@ -488,8 +488,11 @@ local function DoBountyCycle()
         elseif marker then
             local markerCFrame = marker:IsA("Model") and marker:GetPivot() or marker.CFrame
             if SafeTeleport(markerCFrame * CFrame.new(0, -50, 0)) then 
+                local hrp = GetHRP()
+                if hrp then hrp.Anchored = true end 
                 task.wait(0.5) 
                 pcall(function() marker:Destroy() end) 
+                if hrp then hrp.Anchored = false end 
             end
         end
 
