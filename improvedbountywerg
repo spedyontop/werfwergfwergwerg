@@ -313,7 +313,7 @@ local function SendWebhook(chestNames, itemNames)
                 }
             },
             ["footer"] = {
-                ["text"] = "Made by cyanide underground w/ gem",
+                ["text"] = "Made by cyanideunderground w/ gem",
                 ["icon_url"] = "https://i.imgur.com/DI8Les9.png"
             }
         }}
