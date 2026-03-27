@@ -1,0 +1,359 @@
+-- == cyanide AUTO WIPE & SLOT MACRO (RAYFIELD UI) ==
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================
+-- CONFIGURATION & SAVING SYSTEM
+-- ==========================================
+local ConfigFile = "cyanideAutoWipe_Config.json"
+local Config = {
+    Enabled = false,
+    TargetSlot = 0, 
+    AutoCreate = true,
+    MainPlaceId = game.PlaceId 
+}
+
+local function SaveConfig()
+    if writefile then
+        writefile(ConfigFile, HttpService:JSONEncode(Config))
+    end
+end
+
+if isfile and isfile(ConfigFile) then
+    local success, result = pcall(function()
+        return HttpService:JSONDecode(readfile(ConfigFile))
+    end)
+    if success and type(result) == "table" then
+        local savedPlaceId = result.MainPlaceId
+        Config = result
+        if savedPlaceId then
+            Config.MainPlaceId = savedPlaceId
+        end
+    end
+else
+    SaveConfig()
+end
+
+-- ==========================================
+-- CORE FUNCTIONS
+-- ==========================================
+local NoclipConnection = nil
+
+local function enableNoclip()
+    if NoclipConnection then NoclipConnection:Disconnect() end
+    NoclipConnection = RunService.Stepped:Connect(function()
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end)
+    print("[cyanide] Noclip Enabled for Teleport.")
+end
+
+local function disableNoclip()
+    if NoclipConnection then
+        NoclipConnection:Disconnect()
+        NoclipConnection = nil
+        print("[cyanide] Noclip Disabled.")
+    end
+end
+
+local function fixCamera()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local humanoid = char:WaitForChild("Humanoid", 5)
+    local rootPart = char:WaitForChild("HumanoidRootPart", 5)
+    local camera = workspace.CurrentCamera
+    
+    if humanoid then
+        camera.CameraType = Enum.CameraType.Custom
+        camera.CameraSubject = humanoid
+    end
+    if rootPart then
+        rootPart.Anchored = false
+    end
+    print("[cyanide] Camera and character movement restored.")
+end
+
+local function getSlotButton(slotNum)
+    local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+    if not PlayerGui then return nil end
+
+    for _, gui in pairs(PlayerGui:GetChildren()) do
+        if gui:IsA("ScreenGui") then
+            local slotsFrame = gui:FindFirstChild("SlotsFrame")
+            if slotsFrame then
+                local totalSlots = slotsFrame:FindFirstChild("TotalSlots")
+                if totalSlots then
+                    local slotFrame = totalSlots:FindFirstChild(tostring(slotNum))
+                    if slotFrame then
+                        return slotFrame:FindFirstChild("SlotButton")
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function forceClickButton(button)
+    local success = false
+    -- Try firesignal first (Works on most modern executors)
+    if firesignal then
+        pcall(function() firesignal(button.MouseButton1Down) end)
+        pcall(function() firesignal(button.MouseButton1Click) end)
+        pcall(function() firesignal(button.Activated) end)
+        success = true
+    end
+    -- Try getconnections as a fallback/secondary measure
+    if getconnections then
+        for _, conn in pairs(getconnections(button.MouseButton1Click)) do
+            pcall(function() conn:Fire() end)
+            pcall(function() conn.Function() end)
+            success = true
+        end
+    end
+    return success
+end
+
+local function createCharacter()
+    local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+    if not remotes then return end
+    
+    local genders = {"Male", "Female"}
+    local weapons = {"Wand", "Fists", "Sword", "Shield", "Gun"}
+    local traits = {"Healthy", "Energetic", "Guarded", "Agile"}
+    
+    local chosenGender = genders[math.random(1, #genders)]
+    local chosenWeapon = weapons[math.random(1, #weapons)]
+    local chosenTrait = traits[math.random(1, #traits)]
+    
+    print(string.format("[Auto-Create] Rolling: %s | %s | %s", chosenGender, chosenWeapon, chosenTrait))
+    
+    remotes:WaitForChild("ChangeGender"):FireServer(chosenGender)
+    task.wait(0.5) 
+    remotes:WaitForChild("PickWeapon"):FireServer(chosenWeapon)
+    task.wait(0.5)
+    remotes:WaitForChild("PickTrait"):FireServer(chosenTrait, "One")
+    task.wait(0.5)
+    remotes:WaitForChild("FinalizeCharacter"):FireServer()
+    print("[Auto-Create] Character finalized successfully!")
+    
+    task.wait(1)
+    remotes:WaitForChild("CloseUI"):FireServer("CreationUI")
+end
+
+-- ==========================================
+-- MASTER LOOP
+-- ==========================================
+task.spawn(function()
+    while task.wait(1) do
+        if not Config.Enabled then continue end
+
+        -- PHASE 1: DETENTION GAME (BOSS)
+        if game.PlaceId ~= Config.MainPlaceId then
+            print("[cyanide] In Detention Game. Waiting for Mash Burnedead...")
+            
+            local live = workspace:WaitForChild("Live", 99999)
+            local bossFound = false
+            
+            while Config.Enabled and not bossFound do
+                local boss = live:FindFirstChild("Mash Burnedead")
+                if boss and boss:FindFirstChild("BossTag") then
+                    bossFound = true
+                end
+                task.wait(0.5)
+            end
+            
+            if bossFound then
+                print("[cyanide] Boss Spawned! Teleporting back to Main Game...")
+                task.wait(1)
+                TeleportService:Teleport(Config.MainPlaceId, LocalPlayer)
+                task.wait(15) 
+            end
+            continue
+        end
+
+        -- PHASE 2: MAIN MENU (SLOT SELECTION)
+        local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
+        if PlayerGui and PlayerGui:FindFirstChild("SlotsFrame", true) then
+            print("[cyanide] Main Menu detected. Searching for Slot " .. tostring(Config.TargetSlot) .. "...")
+            
+            local button = nil
+            repeat
+                if not Config.Enabled then break end
+                button = getSlotButton(Config.TargetSlot)
+                task.wait(0.5)
+            until button
+            
+            if not Config.Enabled then continue end
+
+            print("[Auto-Slot] SlotButton Found. Attempting force-click...")
+
+            local clicked = false
+            while Config.Enabled and not clicked and task.wait(0.5) do
+                clicked = forceClickButton(button)
+                if clicked then
+                    print("[Auto-Slot] Button clicked successfully via executor signals.")
+                end
+            end
+            
+            if not Config.Enabled then continue end
+
+            -- Auto Character Creation
+            if Config.AutoCreate and clicked then
+                print("[Auto-Slot] Waiting for Character Creation UI...")
+                local creationUI = nil
+                for i = 1, 20 do -- Wait 10 seconds max
+                    creationUI = PlayerGui:FindFirstChild("CreationUI")
+                    if creationUI then break end
+                    task.wait(0.5)
+                end
+                
+                if creationUI then
+                    print("[Auto-Slot] Creation UI detected! Auto-creating...")
+                    task.wait(1) 
+                    createCharacter()
+                    task.wait(1)
+                    fixCamera()
+                else
+                    print("[Auto-Slot] No Creation UI detected. Fixing camera...")
+                    task.wait(2)
+                    fixCamera()
+                end
+            else
+                task.wait(2)
+                fixCamera()
+            end
+            
+            local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+            char:WaitForChild("HumanoidRootPart", 15)
+            task.wait(3)
+            continue 
+        end
+
+        -- PHASE 3: IN GAME (QUESTS & WIPE)
+        local char = LocalPlayer.Character
+        if char and char:FindFirstChild("HumanoidRootPart") and not (PlayerGui and PlayerGui:FindFirstChild("SlotsFrame", true)) then
+            print("[cyanide] In-Game detected. Executing Quests & Wipe...")
+            
+            local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+            if remotes then
+                -- 3A. Standard Quests
+                local quests = {
+                    "A New Beginning", "Getting Familiar", "Nature's Scent", "The Forge Is Hot!", 
+                    "The Overworld", "A New Power", "To Go Beyond", "Weapon Mastery", 
+                    "Oversized Fungus", "Rank D", "Gathering the Veins", "Refinement", 
+                    "Zooming", "Understanding Magic", "Building Reputation", "King of Arachnids", 
+                    "Rank C", "Unfortunate", "Checkpoints", "Magical Power", "An Ancient Problem", 
+                    "Rank B", "Retired Mage", "The Messenger", "Magic Mentor", 
+                    "The Relighted Souls", "Awakened Slumber", "Maximum Power!", 
+                    "Rank A", "Icebound", "Domain of the Monarch", "Living Forge"
+                }
+
+                for _, quest in ipairs(quests) do
+                    if not Config.Enabled then break end
+                    remotes:WaitForChild("CompleteQuest"):FireServer(quest, {Skip = true})
+                    task.wait(0.05) 
+                end
+
+                if not Config.Enabled then continue end
+
+                -- 3B. Evolution Quests
+                remotes:WaitForChild("CompleteQuest"):FireServer("Evolution", {Progress = true})
+                task.wait(1)
+                remotes:WaitForChild("CompleteQuest"):FireServer("Evolution")
+                task.wait(1)
+
+                if not Config.Enabled then continue end
+
+                -- 3C. Teleport and Detention Wipe
+                print("[cyanide] Teleporting to Detention Wipe...")
+                
+                -- ENABLE NOCLIP BEFORE TELEPORTING
+                enableNoclip()
+                
+                char.HumanoidRootPart.CFrame = CFrame.new(-3049, -78, 2659)
+                task.wait(0.5)
+                
+                remotes:WaitForChild("DetentionOption"):FireServer()
+                print("[cyanide] Wipe triggered. Waiting for cross-game teleport...")
+                
+                task.wait(15) 
+                disableNoclip()
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- RAYFIELD UI INTERFACE
+-- ==========================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "cyanide Auto-Wipe",
+   LoadingTitle = "cyanide Scripts",
+   LoadingSubtitle = "by cyanide",
+   ConfigurationSaving = { Enabled = false }, 
+   Discord = { Enabled = false },
+   KeySystem = false
+})
+
+local MainTab = Window:CreateTab("Automation", 4483362458)
+MainTab:CreateSection("Master Control")
+
+local MasterToggle = MainTab:CreateToggle({
+   Name = "Enable Auto-Wipe Loop",
+   CurrentValue = Config.Enabled,
+   Flag = "MasterToggle",
+   Callback = function(Value)
+       Config.Enabled = Value
+       SaveConfig()
+   end,
+})
+
+MainTab:CreateSection("Configuration")
+
+MainTab:CreateSlider({
+   Name = "Target Slot",
+   Range = {0, 10},
+   Increment = 1,
+   Suffix = "Slot",
+   CurrentValue = Config.TargetSlot,
+   Flag = "TargetSlot",
+   Callback = function(Value)
+       Config.TargetSlot = Value
+       SaveConfig()
+   end,
+})
+
+MainTab:CreateToggle({
+   Name = "Auto-Create Character",
+   CurrentValue = Config.AutoCreate,
+   Flag = "AutoCreate",
+   Callback = function(Value)
+       Config.AutoCreate = Value
+       SaveConfig()
+   end,
+})
+
+if Config.Enabled then
+    Rayfield:Notify({
+        Title = "Auto-Wipe Resumed", 
+        Content = "Master toggle is ON. Resuming loop...", 
+        Duration = 5
+    })
+end
