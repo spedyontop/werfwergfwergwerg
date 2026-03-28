@@ -1,0 +1,209 @@
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+task.spawn(function()
+    local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+    local MainMenu = PlayerGui:WaitForChild("MainMenu", 10)
+    
+    if MainMenu then
+        local ButtonContainer = MainMenu:WaitForChild("ButtonContainer", 10)
+        
+        if ButtonContainer then
+            local PlayButton = ButtonContainer:WaitForChild("PlayButton", 10)
+            
+            if PlayButton then
+                local timeout = 10
+                local elapsed = 0
+                
+                -- Wait for the button to become Active
+                while PlayButton.Active ~= true and elapsed < timeout do
+                    task.wait(0.5)
+                    elapsed = elapsed + 0.5
+                end
+
+                if PlayButton.Active == true then
+                    task.wait(0.5) -- Small buffer to ensure the game is ready to receive the click
+                    
+                    pcall(function()
+                        if getconnections then
+                            for _, conn in pairs(getconnections(PlayButton.MouseButton1Click)) do 
+                                conn:Fire() 
+                            end
+                        elseif firesignal then
+                            firesignal(PlayButton.MouseButton1Click)
+                        end
+                    end)
+                    print("[cyanide] Clicked the Play button (MouseButton1 only).")
+                end
+            end
+        end
+    end
+end)
+
+local isFarming = false
+local baseDelay = 1.0
+local stateFileName = "CyanideChestState.txt"
+local blacklistFileName = "CyanideServerBlacklist.json"
+
+-- Load Previous Toggle State
+if isfile and isfile(stateFileName) then
+    if readfile(stateFileName) == "true" then
+        isFarming = true 
+    end
+end
+
+local function GetServerBlacklist()
+    if isfile and isfile(blacklistFileName) then
+        local success, data = pcall(function() return HttpService:JSONDecode(readfile(blacklistFileName)) end)
+        if success and type(data) == "table" then
+            local now = os.time()
+            local cleanedData = {}
+            -- Keep only servers visited within the last 10 minutes (600 seconds)
+            for id, timestamp in pairs(data) do
+                if now - timestamp < 600 then
+                    cleanedData[id] = timestamp
+                end
+            end
+            return cleanedData
+        end
+    end
+    return {}
+end
+
+local function SaveToBlacklist(serverId)
+    local blacklist = GetServerBlacklist()
+    blacklist[serverId] = os.time()
+    if writefile then
+        writefile(blacklistFileName, HttpService:JSONEncode(blacklist))
+    end
+end
+
+local function ServerHop()
+    local placeId = game.PlaceId
+    local blacklist = GetServerBlacklist()
+    
+    local success, result = pcall(function()
+        -- sortOrder=Asc pulls empty servers first
+        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100"))
+    end)
+
+    if success and result and result.data then
+        for _, server in ipairs(result.data) do
+            -- Needs >= 3 players, maxPlayers - 3 buffer, ignores current server, ignores blacklist
+            if server.playing >= 3 and server.playing <= (server.maxPlayers - 3) and server.id ~= game.JobId then
+                if not blacklist[server.id] then
+                    print("[cyanide] Found server with " .. server.playing .. " players. Logging and hopping...")
+                    SaveToBlacklist(server.id)
+                    TeleportService:TeleportToPlaceInstance(placeId, server.id, LocalPlayer)
+                    task.wait(5) 
+                    return
+                end
+            end
+        end
+    end
+    print("[cyanide] Could not find a suitable server. Will try again later.")
+end
+
+task.spawn(function()
+    local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+    if remotes then
+        local notificationEvent = remotes:WaitForChild("NotificationEvent", 10)
+        
+        if notificationEvent then
+            notificationEvent.OnClientEvent:Connect(function(message)
+                if isFarming and type(message) == "string" and string.find(message, "Need at least 3 players to open!") then
+                    print("[cyanide] 3-player requirement hit. Hopping servers...")
+                    ServerHop()
+                    task.wait(10)
+                end
+            end)
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(1.0) do
+        if not isFarming then continue end 
+        
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local chestsFolder = workspace:FindFirstChild("Chests")
+
+        if not root or not chestsFolder then
+            continue 
+        end
+
+        local foundChest = false
+
+        for _, chest in ipairs(chestsFolder:GetChildren()) do
+            if not isFarming then break end 
+
+            if chest.Name == "ChestBox" then
+                local prompt = chest:FindFirstChildOfClass("ProximityPrompt")
+                
+                if prompt and prompt.Enabled then
+                    foundChest = true
+                    
+                    if chest:IsA("BasePart") then
+                        root.CFrame = chest.CFrame * CFrame.new(0, 3, 0)
+                    elseif chest:IsA("Model") and chest.PrimaryPart then
+                        root.CFrame = chest.PrimaryPart.CFrame * CFrame.new(0, 3, 0)
+                    end
+
+                    task.wait(0.4 + (math.random(1, 10) / 100)) 
+
+                    fireproximityprompt(prompt)
+                    
+                    local holdTime = prompt.HoldDuration or 0
+                    local humanVariance = math.random(10, 80) / 100
+                    local totalWait = baseDelay + holdTime + humanVariance
+                    
+                    print("[cyanide] Chest collected. Waiting " .. tostring(totalWait) .. "s")
+                    task.wait(totalWait)
+                end
+            end
+        end
+
+        if not foundChest and isFarming then
+            print("[cyanide] No chests remaining. Hopping servers...")
+            ServerHop()
+            task.wait(10) 
+        end
+    end
+end)
+
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Auto-Chest Panel",
+   LoadingTitle = "cyanide Scripts",
+   LoadingSubtitle = "Stealth Chest Farm",
+   ConfigurationSaving = { Enabled = false },
+   Discord = { Enabled = false },
+   KeySystem = false
+})
+
+local MainTab = Window:CreateTab("Farming", 4483362458)
+
+MainTab:CreateSection("Auto Collect")
+
+MainTab:CreateToggle({
+   Name = "Toggle Stealth Auto-Chest",
+   CurrentValue = isFarming, 
+   Flag = "ChestToggle", 
+   Callback = function(Value)
+       isFarming = Value
+       if writefile then
+           writefile(stateFileName, tostring(Value))
+       end
+   end,
+})
+
+if isFarming then
+    Rayfield:Notify({Title = "Auto-Start", Content = "Stealth farm resumed from last session.", Duration = 3})
+end
