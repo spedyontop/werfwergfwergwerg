@@ -1,0 +1,227 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Cyanide Script",
+    LoadingTitle = "Auto Fish",
+    LoadingSubtitle = "by cyanide underground",
+    ConfigurationSaving = { Enabled = false },
+    KeySystem = false,
+})
+
+local MainTab = Window:CreateTab("Auto Fish", 4483362458)
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local UseTool = Remotes:WaitForChild("UseTool")
+local QTEEvent = ReplicatedStorage:WaitForChild("QTEEvent")
+local DialogueRemote = Remotes:WaitForChild("DialogueRemote")
+local Chests = Workspace:WaitForChild("Chests", 5)
+
+getgenv().AutoFishEnabled = false
+getgenv().AutoBuyBait = false
+getgenv().AutoEquipRod = false
+getgenv().SafeZoneActive = false
+
+local SafeZonePos = Vector3.new(-4883, 45, -2118)
+local WaterLookAt = Vector3.new(-4900, 45, -2118)
+
+local function GetWaterPosition()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {char}
+    params.IgnoreWater = false
+
+    local directions = {
+        hrp.CFrame.LookVector * 50,
+        hrp.CFrame.RightVector * 50,
+        -hrp.CFrame.RightVector * 50,
+        -hrp.CFrame.LookVector * 50,
+        Vector3.new(0, -100, 0)
+    }
+
+    if getgenv().SafeZoneActive then
+        table.insert(directions, 1, (WaterLookAt - SafeZonePos).Unit * 50)
+    end
+
+    for _, dir in ipairs(directions) do
+        local result = Workspace:Raycast(hrp.Position, dir + Vector3.new(0, -30, 0), params)
+        if result and result.Material == Enum.Material.Water then
+            return result.Position
+        end
+    end
+    return nil
+end
+
+local function IsMyBobber(part)
+    if not (part:IsA("BasePart") and part.Color == Color3.fromRGB(255, 60, 60)) then return false end
+    local rope = part:FindFirstChildOfClass("RopeConstraint")
+    if not rope then return false end
+    
+    local char = LocalPlayer.Character
+    if char then
+        local att0, att1 = rope.Attachment0, rope.Attachment1
+        if (att0 and att0:IsDescendantOf(char)) or (att1 and att1:IsDescendantOf(char)) then
+            return true
+        end
+    end
+    return false
+end
+
+task.spawn(function()
+    while task.wait() do
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChild("Humanoid")
+
+        if getgenv().AutoFishEnabled and hrp and hum then
+            if hum.MoveDirection.Magnitude == 0 then
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, 0, 0)
+            end
+            
+            if Chests then
+                for _, chest in ipairs(Chests:GetChildren()) do
+                    if chest.Name == "ChestBox" and (chest.Position - hrp.Position).Magnitude <= 20 then
+                        local prompt = chest:FindFirstChildOfClass("ProximityPrompt")
+                        if prompt and prompt.Enabled then 
+                            local snapCF = hrp.CFrame
+                            fireproximityprompt(prompt)
+                            
+                            local lockTime = os.clock() + 1.2
+                            local connection
+                            connection = RunService.Heartbeat:Connect(function()
+                                if os.clock() > lockTime or not getgenv().AutoFishEnabled then
+                                    connection:Disconnect()
+                                    return
+                                end
+                                hrp.CFrame = snapCF
+                                hrp.Velocity = Vector3.new(0,0,0)
+                                hrp.RotVelocity = Vector3.new(0,0,0)
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+
+        if getgenv().AutoEquipRod and char and hum then
+            if not char:FindFirstChild("FishingRod") then
+                local rod = LocalPlayer.Backpack:FindFirstChild("FishingRod")
+                if rod then hum:EquipTool(rod) end
+            end
+        end
+
+        if getgenv().AutoBuyBait then
+            if not LocalPlayer.Backpack:FindFirstChild("Bait") and not (char and char:FindFirstChild("Bait")) then
+                DialogueRemote:FireServer("Action", "Buy_Bait_15", Workspace.NPC.Daniel)
+            end
+        end
+
+        if getgenv().SafeZoneActive and hrp then
+            if (hrp.Position - SafeZonePos).Magnitude > 20 then
+                hrp.CFrame = CFrame.lookAt(SafeZonePos, WaterLookAt)
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+local function StartFishingLoop()
+    while getgenv().AutoFishEnabled do
+        local castPos = GetWaterPosition()
+        if castPos then
+            pcall(function()
+                UseTool:FireServer("FishingRod", "Primary", castPos)
+            end)
+            
+            local myBobber = nil
+            local biteDetected = false
+            local findStart = os.clock()
+            
+            while not myBobber and getgenv().AutoFishEnabled and (os.clock() - findStart < 4) do
+                for _, obj in ipairs(Workspace:GetChildren()) do
+                    if IsMyBobber(obj) then
+                        myBobber = obj
+                        break
+                    end
+                end
+                task.wait()
+            end
+
+            if myBobber then
+                local connection
+                connection = myBobber.ChildAdded:Connect(function(child)
+                    if child.Name == "FishBite" then
+                        biteDetected = true
+                    end
+                end)
+
+                while not biteDetected and myBobber.Parent and getgenv().AutoFishEnabled do
+                    task.wait()
+                end
+                if connection then connection:Disconnect() end
+
+                if biteDetected and getgenv().AutoFishEnabled then
+                    task.wait(0.05)
+                    pcall(function() UseTool:FireServer("FishingRod", "Primary", castPos) end)
+                    task.wait(0.15)
+                    pcall(function() QTEEvent:FireServer("MashingSuccess") end)
+                    task.wait(1.5)
+                end
+            end
+        else
+            task.wait(0.5)
+        end
+        task.wait(0.1)
+    end
+end
+
+MainTab:CreateToggle({
+    Name = "Auto Fish",
+    CurrentValue = false,
+    Flag = "FishToggle",
+    Callback = function(Value)
+        getgenv().AutoFishEnabled = Value
+        if Value then task.spawn(StartFishingLoop) end
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Auto Equip Rod",
+    CurrentValue = false,
+    Flag = "EquipToggle",
+    Callback = function(Value)
+        getgenv().AutoEquipRod = Value
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Auto Buy Bait (Daniel)",
+    CurrentValue = false,
+    Flag = "BaitToggle",
+    Callback = function(Value)
+        getgenv().AutoBuyBait = Value
+    end,
+})
+
+MainTab:CreateToggle({
+    Name = "Teleport Fishing Safe Zone",
+    CurrentValue = false,
+    Flag = "SafeToggle",
+    Callback = function(Value)
+        getgenv().SafeZoneActive = Value
+        if Value then
+            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then hrp.CFrame = CFrame.lookAt(SafeZonePos, WaterLookAt) end
+        end
+    end,
+})
