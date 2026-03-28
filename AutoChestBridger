@@ -98,11 +98,13 @@ local function SendWebhook()
         placeName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
     end)
     
+    -- Extract Moola value safely
     local moolaAmount = "Unknown"
     pcall(function()
         local moolaUI = LocalPlayer.PlayerGui:FindFirstChild("MoolaCount")
         if moolaUI and moolaUI:FindFirstChild("TextLabel") then
             local rawText = moolaUI.TextLabel.Text
+            -- Grabs only the numbers (and commas if they exist) from "Moola: 14332"
             local match = string.match(rawText, "[%d,]+") 
             if match then
                 moolaAmount = match
@@ -190,6 +192,9 @@ task.spawn(function()
     end
 end)
 
+-- ==========================================
+-- GLOBAL VARIABLES & STATE MANAGEMENT
+-- ==========================================
 local isFarming = false
 local baseDelay = 1.0 
 local stateFileName = "CyanideChestState.txt"
@@ -201,6 +206,9 @@ if isfile and isfile(stateFileName) then
     end
 end
 
+-- ==========================================
+-- BACKGROUND NOCLIP LOOP
+-- ==========================================
 RunService.Stepped:Connect(function()
     if isFarming and LocalPlayer.Character then
         for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
@@ -211,6 +219,9 @@ RunService.Stepped:Connect(function()
     end
 end)
 
+-- ==========================================
+-- SERVER HOP & BLACKLIST SYSTEM
+-- ==========================================
 local function GetServerBlacklist()
     if isfile and isfile(blacklistFileName) then
         local success, data = pcall(function() return HttpService:JSONDecode(readfile(blacklistFileName)) end)
@@ -261,7 +272,7 @@ local function ServerHop()
 end
 
 -- ==========================================
--- NOTIFICATION EVENT LISTENER (UPDATED)
+-- NOTIFICATION EVENT LISTENER
 -- ==========================================
 task.spawn(function()
     local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
@@ -270,24 +281,19 @@ task.spawn(function()
         
         if notificationEvent then
             notificationEvent.OnClientEvent:Connect(function(message)
-                if isFarming and type(message) == "string" then
-                    -- Check for the 3-player requirement OR the unlocking timer
-                    local needsPlayers = string.find(message, "Need at least 3 players to open!")
-                    local chestsLocked = string.find(message, "Chests unlocking in %d+ mins!")
-
-                    if needsPlayers or chestsLocked then
-                        local reason = needsPlayers and "3-player requirement" or "Timed lock detected"
-                        print("[cyanide] " .. reason .. ". Hopping servers...")
-                        
-                        ServerHop()
-                        task.wait(10)
-                    end
+                if isFarming and type(message) == "string" and string.find(message, "Need at least 3 players to open!") then
+                    print("[cyanide] 3-player requirement hit. Hopping servers...")
+                    ServerHop()
+                    task.wait(10)
                 end
             end)
         end
     end
 end)
 
+-- ==========================================
+-- BACKGROUND FARMING LOOP
+-- ==========================================
 task.spawn(function()
     while task.wait(0.5) do
         if not isFarming then continue end 
@@ -356,6 +362,9 @@ task.spawn(function()
     end
 end)
 
+-- ==========================================
+-- UI SETUP
+-- ==========================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
@@ -390,6 +399,9 @@ MainTab:CreateToggle({
    end,
 })
 
+-- ==========================================
+-- WEBHOOK TAB SETUP
+-- ==========================================
 local WebhookTab = Window:CreateTab("Webhook", 4483362458)
 
 WebhookTab:CreateSection("Discord Integration")
