@@ -11,46 +11,42 @@ task.spawn(function()
     local MainMenu = PlayerGui:WaitForChild("MainMenu", 10)
     
     if MainMenu then
-        local ButtonContainer = MainMenu:WaitForChild("ButtonContainer", 10)
+        local ButtonContainer = MainMenu:WaitForChild("ButtonContainer", 5)
         
         if ButtonContainer then
-            local PlayButton = ButtonContainer:WaitForChild("PlayButton", 10)
+            local PlayButton = ButtonContainer:WaitForChild("PlayButton", 5)
             
             if PlayButton then
-                local timeout = 10
-                local elapsed = 0
-                
-                -- Wait for the button to become Active
-                while PlayButton.Active ~= true and elapsed < timeout do
-                    task.wait(0.5)
-                    elapsed = elapsed + 0.5
-                end
-
-                if PlayButton.Active == true then
-                    task.wait(0.5) -- Small buffer to ensure the game is ready to receive the click
-                    
-                    pcall(function()
-                        if getconnections then
-                            for _, conn in pairs(getconnections(PlayButton.MouseButton1Click)) do 
-                                conn:Fire() 
+                -- Scan every 5 seconds as long as the menu still exists on the screen
+                while MainMenu and MainMenu.Parent and PlayButton and PlayButton.Parent do
+                    if PlayButton.Active == true then
+                        pcall(function()
+                            if getconnections then
+                                for _, conn in pairs(getconnections(PlayButton.MouseButton1Click)) do 
+                                    conn:Fire() 
+                                end
+                            elseif firesignal then
+                                firesignal(PlayButton.MouseButton1Click)
                             end
-                        elseif firesignal then
-                            firesignal(PlayButton.MouseButton1Click)
-                        end
-                    end)
-                    print("[cyanide] Clicked the Play button (MouseButton1 only).")
+                        end)
+                        print("[cyanide] Play button is active. Click fired.")
+                    else
+                        print("[cyanide] Play button not active yet. Waiting...")
+                    end
+                    
+                    task.wait(5) -- Wait 5 seconds before the next scan
                 end
+                print("[cyanide] Main Menu bypassed.")
             end
         end
     end
 end)
 
 local isFarming = false
-local baseDelay = 1.0
+local baseDelay = 1.0 
 local stateFileName = "CyanideChestState.txt"
 local blacklistFileName = "CyanideServerBlacklist.json"
 
--- Load Previous Toggle State
 if isfile and isfile(stateFileName) then
     if readfile(stateFileName) == "true" then
         isFarming = true 
@@ -127,7 +123,7 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    while task.wait(1.0) do
+    while task.wait(0.5) do
         if not isFarming then continue end 
         
         local char = LocalPlayer.Character
