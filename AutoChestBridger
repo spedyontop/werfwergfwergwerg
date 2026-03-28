@@ -5,7 +5,152 @@ local LocalPlayer = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
 
+-- ==========================================
+-- WEBHOOK & STAT TRACKING VARIABLES
+-- ==========================================
+local webhookFileName = "CyanideWebhookURL.txt"
+local webhookToggleFileName = "CyanideWebhookToggle.txt"
+local statsFileName = "CyanideLastSession.json"
+
+local webhookUrl = ""
+local webhookEnabled = false
+local chestsFarmedThisSession = 0
+local farmStartTime = os.time()
+local lastSessionStats = { TimeTaken = 0, ChestsLooted = 0 }
+
+if isfile and isfile(webhookFileName) then
+    webhookUrl = readfile(webhookFileName)
+end
+if isfile and isfile(webhookToggleFileName) then
+    if readfile(webhookToggleFileName) == "true" then
+        webhookEnabled = true
+    end
+end
+
+if isfile and isfile(statsFileName) then
+    pcall(function()
+        lastSessionStats = HttpService:JSONDecode(readfile(statsFileName))
+    end)
+    if writefile then
+        writefile(statsFileName, HttpService:JSONEncode({ TimeTaken = 0, ChestsLooted = 0 }))
+    end
+end
+
+local function SaveSessionStats()
+    local stats = {
+        TimeTaken = os.time() - farmStartTime,
+        ChestsLooted = chestsFarmedThisSession
+    }
+    if writefile then
+        writefile(statsFileName, HttpService:JSONEncode(stats))
+    end
+end
+
+local function GetBackpackString()
+    local inventory = {}
+    local function scan(parent)
+        if not parent then return end
+        for _, item in ipairs(parent:GetChildren()) do
+            if item:IsA("Tool") then
+                local qtyObj = item:FindFirstChild("Quantity")
+                local count = 1
+                
+                if qtyObj and (qtyObj:IsA("IntValue") or qtyObj:IsA("NumberValue")) then
+                    count = qtyObj.Value
+                end
+                
+                inventory[item.Name] = (inventory[item.Name] or 0) + count
+            end
+        end
+    end
+    
+    scan(LocalPlayer:FindFirstChild("Backpack"))
+    scan(LocalPlayer.Character)
+    
+    local str = ""
+    for name, count in pairs(inventory) do
+        str = str .. name .. " [x" .. count .. "]\n"
+    end
+    
+    if str == "" then 
+        return "Empty" 
+    else
+        return string.sub(str, 1, -2) 
+    end
+end
+
+local function SendWebhook()
+    if not webhookEnabled or webhookUrl == "" then return end
+    
+    if lastSessionStats.TimeTaken == 0 and lastSessionStats.ChestsLooted == 0 then return end
+    
+    local timeStr = tostring(lastSessionStats.TimeTaken) .. " seconds"
+    if lastSessionStats.TimeTaken > 60 then
+        timeStr = tostring(math.floor(lastSessionStats.TimeTaken / 60)) .. "m " .. tostring(lastSessionStats.TimeTaken % 60) .. "s"
+    end
+    
+    local placeName = "bridger: WESTERN"
+    pcall(function()
+        placeName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+    end)
+    
+    -- Extract Moola value safely
+    local moolaAmount = "Unknown"
+    pcall(function()
+        local moolaUI = LocalPlayer.PlayerGui:FindFirstChild("MoolaCount")
+        if moolaUI and moolaUI:FindFirstChild("TextLabel") then
+            local rawText = moolaUI.TextLabel.Text
+            -- Grabs only the numbers (and commas if they exist) from "Moola: 14332"
+            local match = string.match(rawText, "[%d,]+") 
+            if match then
+                moolaAmount = match
+            else
+                moolaAmount = rawText
+            end
+        end
+    end)
+    
+    local data = {
+        ["embeds"] = {{
+            ["title"] = "Cyanide's Auto Chest",
+            ["description"] = "Username: ||" .. LocalPlayer.Name .. "||\nMoola (Cash): ``" .. moolaAmount .. "``\nTime Taken: ``" .. timeStr .. "``\nTotal Chests Looted: ``Chests [x" .. tostring(lastSessionStats.ChestsLooted) .. "]``",
+            ["color"] = 11861934,
+            ["fields"] = {
+                {
+                    ["name"] = "Current Backpack",
+                    ["value"] = GetBackpackString()
+                }
+            },
+            ["author"] = {
+                ["name"] = "Successfully rejoined " .. placeName .. ""
+            },
+            ["footer"] = {
+                ["text"] = "Made by cyanideunderground & gem",
+                ["icon_url"] = "https://cdn.discordapp.com/attachments/1486729906388734032/1487395856083845260/DI8Les9.png?ex=69c8fcd6&is=69c7ab56&hm=c503257738c1468178cfc70e943e60d501d36fe94821412ad0c1920a6013202b&"
+            }
+        }}
+    }
+    
+    local requestFunc = request or http_request or (syn and syn.request)
+    if requestFunc then
+        pcall(function()
+            requestFunc({
+                Url = webhookUrl,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(data)
+            })
+        end)
+    end
+end
+
+-- ==========================================
+-- VIRTUAL INPUT MANAGER: AUTO-CLICK PLAY
+-- ==========================================
 task.spawn(function()
     local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
     local MainMenu = PlayerGui:WaitForChild("MainMenu", 10)
@@ -17,31 +162,39 @@ task.spawn(function()
             local PlayButton = ButtonContainer:WaitForChild("PlayButton", 5)
             
             if PlayButton then
-                -- Scan every 5 seconds as long as the menu still exists on the screen
                 while MainMenu and MainMenu.Parent and PlayButton and PlayButton.Parent do
                     if PlayButton.Active == true then
-                        pcall(function()
-                            if getconnections then
-                                for _, conn in pairs(getconnections(PlayButton.MouseButton1Click)) do 
-                                    conn:Fire() 
-                                end
-                            elseif firesignal then
-                                firesignal(PlayButton.MouseButton1Click)
-                            end
-                        end)
-                        print("[cyanide] Play button is active. Click fired.")
+                        local absPos = PlayButton.AbsolutePosition
+                        local absSize = PlayButton.AbsoluteSize
+                        local inset = GuiService:GetGuiInset() 
+                        
+                        local clickX = absPos.X + (absSize.X / 2)
+                        local clickY = absPos.Y + (absSize.Y / 2) + inset.Y
+                        
+                        VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
+                        task.wait(0.05)
+                        VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
+                        
+                        print("[cyanide] Play button clicked via VirtualInputManager.")
                     else
                         print("[cyanide] Play button not active yet. Waiting...")
                     end
                     
-                    task.wait(5) -- Wait 5 seconds before the next scan
+                    task.wait(5)
                 end
                 print("[cyanide] Main Menu bypassed.")
+                
+                if not LocalPlayer.Character then LocalPlayer.CharacterAdded:Wait() end
+                task.wait(3) 
+                SendWebhook()
             end
         end
     end
 end)
 
+-- ==========================================
+-- GLOBAL VARIABLES & STATE MANAGEMENT
+-- ==========================================
 local isFarming = false
 local baseDelay = 1.0 
 local stateFileName = "CyanideChestState.txt"
@@ -53,13 +206,28 @@ if isfile and isfile(stateFileName) then
     end
 end
 
+-- ==========================================
+-- BACKGROUND NOCLIP LOOP
+-- ==========================================
+RunService.Stepped:Connect(function()
+    if isFarming and LocalPlayer.Character then
+        for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- SERVER HOP & BLACKLIST SYSTEM
+-- ==========================================
 local function GetServerBlacklist()
     if isfile and isfile(blacklistFileName) then
         local success, data = pcall(function() return HttpService:JSONDecode(readfile(blacklistFileName)) end)
         if success and type(data) == "table" then
             local now = os.time()
             local cleanedData = {}
-            -- Keep only servers visited within the last 10 minutes (600 seconds)
             for id, timestamp in pairs(data) do
                 if now - timestamp < 600 then
                     cleanedData[id] = timestamp
@@ -84,16 +252,14 @@ local function ServerHop()
     local blacklist = GetServerBlacklist()
     
     local success, result = pcall(function()
-        -- sortOrder=Asc pulls empty servers first
         return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100"))
     end)
 
     if success and result and result.data then
         for _, server in ipairs(result.data) do
-            -- Needs >= 3 players, maxPlayers - 3 buffer, ignores current server, ignores blacklist
             if server.playing >= 3 and server.playing <= (server.maxPlayers - 3) and server.id ~= game.JobId then
                 if not blacklist[server.id] then
-                    print("[cyanide] Found server with " .. server.playing .. " players. Logging and hopping...")
+                    print("[cyanide] Found server with " .. server.playing .. " players. Hopping...")
                     SaveToBlacklist(server.id)
                     TeleportService:TeleportToPlaceInstance(placeId, server.id, LocalPlayer)
                     task.wait(5) 
@@ -105,6 +271,9 @@ local function ServerHop()
     print("[cyanide] Could not find a suitable server. Will try again later.")
 end
 
+-- ==========================================
+-- NOTIFICATION EVENT LISTENER
+-- ==========================================
 task.spawn(function()
     local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
     if remotes then
@@ -122,6 +291,9 @@ task.spawn(function()
     end
 end)
 
+-- ==========================================
+-- BACKGROUND FARMING LOOP
+-- ==========================================
 task.spawn(function()
     while task.wait(0.5) do
         if not isFarming then continue end 
@@ -145,10 +317,19 @@ task.spawn(function()
                 if prompt and prompt.Enabled then
                     foundChest = true
                     
+                    local antiFall = root:FindFirstChild("CyanideAntiFall")
+                    if not antiFall then
+                        antiFall = Instance.new("BodyVelocity")
+                        antiFall.Name = "CyanideAntiFall"
+                        antiFall.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                        antiFall.Velocity = Vector3.new(0, 0, 0)
+                        antiFall.Parent = root
+                    end
+                    
                     if chest:IsA("BasePart") then
-                        root.CFrame = chest.CFrame * CFrame.new(0, 3, 0)
+                        root.CFrame = chest.CFrame * CFrame.new(0, -9, 0)
                     elseif chest:IsA("Model") and chest.PrimaryPart then
-                        root.CFrame = chest.PrimaryPart.CFrame * CFrame.new(0, 3, 0)
+                        root.CFrame = chest.PrimaryPart.CFrame * CFrame.new(0, -9, 0)
                     end
 
                     task.wait(0.4 + (math.random(1, 10) / 100)) 
@@ -160,6 +341,10 @@ task.spawn(function()
                     local totalWait = baseDelay + holdTime + humanVariance
                     
                     print("[cyanide] Chest collected. Waiting " .. tostring(totalWait) .. "s")
+                    
+                    chestsFarmedThisSession = chestsFarmedThisSession + 1
+                    SaveSessionStats()
+                    
                     task.wait(totalWait)
                 end
             end
@@ -167,18 +352,25 @@ task.spawn(function()
 
         if not foundChest and isFarming then
             print("[cyanide] No chests remaining. Hopping servers...")
+            
+            local activeFall = char and char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart:FindFirstChild("CyanideAntiFall")
+            if activeFall then activeFall:Destroy() end
+            
             ServerHop()
             task.wait(10) 
         end
     end
 end)
 
+-- ==========================================
+-- UI SETUP
+-- ==========================================
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-   Name = "Auto-Chest Panel",
-   LoadingTitle = "cyanide Scripts",
-   LoadingSubtitle = "Stealth Chest Farm",
+   Name = "Auto Chest",
+   LoadingTitle = "Auto Chest Farm",
+   LoadingSubtitle = "by cyandieunderground & gem",
    ConfigurationSaving = { Enabled = false },
    Discord = { Enabled = false },
    KeySystem = false
@@ -189,7 +381,7 @@ local MainTab = Window:CreateTab("Farming", 4483362458)
 MainTab:CreateSection("Auto Collect")
 
 MainTab:CreateToggle({
-   Name = "Toggle Stealth Auto-Chest",
+   Name = "Toggle Auto Chest",
    CurrentValue = isFarming, 
    Flag = "ChestToggle", 
    Callback = function(Value)
@@ -197,9 +389,53 @@ MainTab:CreateToggle({
        if writefile then
            writefile(stateFileName, tostring(Value))
        end
+       
+       if not isFarming and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+           local activeFall = LocalPlayer.Character.HumanoidRootPart:FindFirstChild("CyanideAntiFall")
+           if activeFall then
+               activeFall:Destroy()
+           end
+       end
    end,
 })
 
+-- ==========================================
+-- WEBHOOK TAB SETUP
+-- ==========================================
+local WebhookTab = Window:CreateTab("Webhook", 4483362458)
+
+WebhookTab:CreateSection("Discord Integration")
+
+WebhookTab:CreateToggle({
+    Name = "Enable Discord Webhook",
+    CurrentValue = webhookEnabled,
+    Flag = "WebhookToggle",
+    Callback = function(Value)
+        webhookEnabled = Value
+        if writefile then
+            writefile(webhookToggleFileName, tostring(Value))
+        end
+    end,
+})
+
+local WebhookInput = WebhookTab:CreateInput({
+    Name = "Webhook URL",
+    PlaceholderText = "Paste Discord Webhook URL Here...",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text)
+        webhookUrl = Text
+        if writefile then
+            writefile(webhookFileName, Text)
+        end
+    end,
+})
+
+if webhookUrl ~= "" then
+    pcall(function()
+        WebhookInput:Set(webhookUrl)
+    end)
+end
+
 if isFarming then
-    Rayfield:Notify({Title = "Auto-Start", Content = "Stealth farm resumed from last session.", Duration = 3})
+    Rayfield:Notify({Title = "Auto-Start", Content = "Farm resumed from last session.", Duration = 3})
 end
