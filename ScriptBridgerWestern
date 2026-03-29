@@ -11,6 +11,7 @@ local TabPilot = Window:CreateTab("Stand Mods", 4483362458)
 local TabHorse = Window:CreateTab("Horse Mods", 4483362458)
 local TabNPC = Window:CreateTab("Mud Witch", 4483362458)
 
+
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
@@ -74,69 +75,66 @@ end)
 TabScripts:CreateButton({
     Name = "Execute Infinite Stamina",
     Callback = function()
-        local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local RunService = game:GetService("RunService")
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local StaminaRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("StaminaUpdate")
 
-local LocalPlayer = Players.LocalPlayer
-local StaminaRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("StaminaUpdate")
+        local SPRINT_SPEED = 25
+        local DEFAULT_SPEED = 16
 
-local SPRINT_SPEED = 25
-local DEFAULT_SPEED = 16
+        local entityFolder = workspace:FindFirstChild("Entities")
+        local myEntity = nil
+        local targetAnim = nil
 
-local entityFolder = workspace:FindFirstChild("Entities")
-local myEntity = nil
-local targetAnim = nil
-
-for _, connection in pairs(getconnections(StaminaRemote.OnClientEvent)) do
-    pcall(function()
-        if connection.Disable then
-            connection:Disable()
-        elseif pcall(function() return connection.Enabled end) then
-            connection.Enabled = false
-        end
-    end)
-end
-
-task.spawn(function()
-    while true do
-        firesignal(StaminaRemote.OnClientEvent, 100, 100)
-        task.wait(0.1)
-    end
-end)
-
-RunService.Heartbeat:Connect(function()
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-    if not hum or hum.Health <= 0 then return end
-    
-    if not myEntity or myEntity.Parent ~= entityFolder then
-        myEntity = entityFolder and entityFolder:FindFirstChild(LocalPlayer.Name)
-        targetAnim = myEntity and myEntity:FindFirstChild("RunningAnim")
-    end
-
-    local animator = hum:FindFirstChild("Animator")
-    if animator and targetAnim then
-        local isRunningAnimActive = false
-        
-        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-            if track.Animation == targetAnim then
-                isRunningAnimActive = true
-                break
-            end
+        for _, connection in pairs(getconnections(StaminaRemote.OnClientEvent)) do
+            pcall(function()
+                if connection.Disable then
+                    connection:Disable()
+                elseif pcall(function() return connection.Enabled end) then
+                    connection.Enabled = false
+                end
+            end)
         end
 
-        if isRunningAnimActive then
-            if hum.WalkSpeed ~= SPRINT_SPEED then
-                hum.WalkSpeed = SPRINT_SPEED
+        task.spawn(function()
+            while true do
+                firesignal(StaminaRemote.OnClientEvent, 100, 100)
+                task.wait(0.1)
             end
-        else
-            if hum.WalkSpeed == SPRINT_SPEED then
-                hum.WalkSpeed = DEFAULT_SPEED
+        end)
+
+        RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChild("Humanoid")
+            if not hum or hum.Health <= 0 then return end
+            
+            if not myEntity or myEntity.Parent ~= entityFolder then
+                myEntity = entityFolder and entityFolder:FindFirstChild(LocalPlayer.Name)
+                targetAnim = myEntity and myEntity:FindFirstChild("RunningAnim")
             end
-        end
-    end
-end)
+
+            local animator = hum:FindFirstChild("Animator")
+            if animator and targetAnim then
+                local isRunningAnimActive = false
+                
+                for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                    if track.Animation == targetAnim then
+                        isRunningAnimActive = true
+                        break
+                    end
+                end
+
+                if isRunningAnimActive then
+                    if hum.WalkSpeed ~= SPRINT_SPEED then
+                        hum.WalkSpeed = SPRINT_SPEED
+                    end
+                else
+                    if hum.WalkSpeed == SPRINT_SPEED then
+                        hum.WalkSpeed = DEFAULT_SPEED
+                    end
+                end
+            end
+        end)
         print("[cyanide] Stamina updated to infinite.")
     end,
 })
@@ -160,7 +158,6 @@ TabScripts:CreateButton({
             local result = oldRequire(module)
             
             if type(result) == "table" then
-                -- Only modifying the visual/physical kick intensity
                 if result.ShakeIntensity then result.ShakeIntensity = 0 end
                 if result.ShakeDuration then result.ShakeDuration = 0 end
                 if result.AimingShakeMultiplier then result.AimingShakeMultiplier = 0 end
@@ -189,7 +186,6 @@ TabScripts:CreateButton({
     end,
 })
 
--- Stands tab
 TabPilot:CreateLabel("Summon stand before piloting, equip item to stop piloting.")
 
 TabPilot:CreateButton({
@@ -256,25 +252,23 @@ PilotModule.StartPiloting = function(model, stats, controls)
     return oldStart(model, stats, controls)
 end
 
--- Independent Range Toggle
 TabPilot:CreateToggle({
     Name = "Enable Infinite Pilot Range",
     CurrentValue = false,
     Flag = "InfiniteRangeToggle",
     Callback = function(Value) 
         InfiniteRangeEnabled = Value 
-        ApplyPilotStats() -- Updates instantly mid-flight
+        ApplyPilotStats() 
     end,
 })
 
--- Movement Stats Toggle
 local PilotToggle = TabPilot:CreateToggle({
     Name = "Enable Custom Pilot Speed",
     CurrentValue = false,
     Flag = "PilotStatsToggle",
     Callback = function(Value) 
         PilotStatsEnabled = Value 
-        ApplyPilotStats() -- Updates instantly mid-flight
+        ApplyPilotStats() 
     end,
 })
 
