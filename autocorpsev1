@@ -1,0 +1,189 @@
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local TargetItems = {
+    ["SaintsLeftArm"] = true,
+    ["SaintsRightLeg"] = true,
+    ["SaintsRibcage"] = true,
+    ["SaintsLeftLeg"] = true,
+    ["SaintsRightArm"] = true,
+    ["SaintsHeart"] = true
+}
+
+local SAFE_ZONE = CFrame.new(10079, 50003, -13)
+local EVASION_HEIGHT = 5000 
+local TWEEN_SPEED = 3000 
+local isBusy = false
+local fileName = "Cyanide_VisitedServers.json"
+
+local function GetVisitedServers()
+    if isfile and isfile(fileName) then
+        local success, data = pcall(function()
+            return HttpService:JSONDecode(readfile(fileName))
+        end)
+        if success and type(data) == "table" then return data end
+    end
+    return {}
+end
+
+local function SaveVisitedServer(jobId)
+    local servers = GetVisitedServers()
+    servers[jobId] = os.time()
+    for id, timestamp in pairs(servers) do
+        if os.time() - timestamp > 600 then servers[id] = nil end
+    end
+    if writefile then pcall(function() writefile(fileName, HttpService:JSONEncode(servers)) end) end
+end
+
+local function ServerHop()
+    if isBusy then return end
+    isBusy = true
+    SaveVisitedServer(game.JobId)
+    local servers = GetVisitedServers()
+    local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Desc&limit=100"
+    
+    while true do
+        local success, result = pcall(function() return game:HttpGet(url) end)
+        if success then
+            local data = HttpService:JSONDecode(result)
+            if data and data.data then
+                for _, server in ipairs(data.data) do
+                    if server.playing <= (server.maxPlayers - 5) and server.playing >= 8 and not servers[server.id] and server.id ~= game.JobId then
+                        TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
+                        task.wait(10)
+                    end
+                end
+            end
+        end
+        task.wait(3)
+    end
+end
+
+local function StartEvasionTween(hrp)
+    local duration = EVASION_HEIGHT / TWEEN_SPEED
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1, true)
+    local targetCFrame = SAFE_ZONE * CFrame.new(0, EVASION_HEIGHT, 0)
+    
+    hrp.CFrame = SAFE_ZONE
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    return tween
+end
+
+local function GrabNearbyPrompts(radius, targetItemName)
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    for _, prompt in pairs(Workspace:GetDescendants()) do
+        if prompt:IsA("ProximityPrompt") then
+            local parent = prompt.Parent
+            local pos = parent:IsA("Attachment") and parent.WorldPosition or parent:IsA("BasePart") and parent.Position or parent:IsA("Model") and parent:GetPivot().Position
+            
+            if pos and (pos - hrp.Position).Magnitude <= radius then
+                pcall(function() prompt.HoldDuration = 0 end)
+                prompt:InputHoldBegin()
+                if fireproximityprompt then fireproximityprompt(prompt) end
+                task.wait(0.1)
+                prompt:InputHoldEnd()
+            end
+        end
+    end
+
+    local timeout = 0
+    while timeout < 20 do
+        if LocalPlayer.Character:FindFirstChild(targetItemName, true) then
+            return true
+        end
+        task.wait(0.1)
+        timeout = timeout + 1
+    end
+    return false
+end
+
+local function HandleSpawn(item)
+    if isBusy then return end
+    isBusy = true
+    
+    local itemName = item.Name
+    task.wait(0.5)
+
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local originalCFrame = hrp.CFrame
+        hrp.CFrame = item:IsA("Model") and item:GetPivot() or item.CFrame
+        task.wait(0.5)
+        
+        print("[Cyanide] Attempting capture of " .. itemName)
+        local success = GrabNearbyPrompts(15, itemName)
+        
+        if success then
+            print("[Cyanide] Capture confirmed. Evading other players.")
+            local evasionTween = StartEvasionTween(hrp)
+            hrp.Anchored = true
+            
+            task.wait(120)
+            
+            evasionTween:Cancel()
+            hrp.Anchored = false
+            hrp.CFrame = originalCFrame
+            print("[Cyanide] Evasion finished. Hopping.")
+            isBusy = false
+            ServerHop()
+        else
+            print("[Cyanide] Capture failed/Stolen. Hopping.")
+            isBusy = false
+            ServerHop()
+        end
+    end
+    isBusy = false
+end
+
+
+local function StartHunting()
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if TargetItems[obj.Name] then
+            task.spawn(HandleSpawn, obj)
+            return
+        end
+    end
+    ServerHop()
+end
+
+task.spawn(function()
+    local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+    local MainMenu = PlayerGui:WaitForChild("MainMenu", 10)
+    if MainMenu then
+        local PlayButton = MainMenu:WaitForChild("ButtonContainer"):WaitForChild("PlayButton")
+        while MainMenu.Parent do
+            if PlayButton.Active then
+                local pos, size = PlayButton.AbsolutePosition, PlayButton.AbsoluteSize
+                local inset = GuiService:GetGuiInset()
+                VirtualInputManager:SendMouseButtonEvent(pos.X + size.X/2, pos.Y + size.Y/2 + inset.Y, 0, true, game, 1)
+                task.wait(0.05)
+                VirtualInputManager:SendMouseButtonEvent(pos.X + size.X/2, pos.Y + size.Y/2 + inset.Y, 0, false, game, 1)
+            end
+            task.wait(2)
+        end
+    end
+    if not LocalPlayer.Character then LocalPlayer.CharacterAdded:Wait() end
+    task.wait(2)
+    StartHunting()
+end)
+
+Workspace.DescendantAdded:Connect(function(obj)
+    if TargetItems[obj.Name] and not isBusy then
+        task.spawn(HandleSpawn, obj)
+    end
+end)
