@@ -1,0 +1,274 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Window = Rayfield:CreateWindow({
+   Name = "cyanide bridger",
+   LoadingTitle = "cyanide bridger",
+   LoadingSubtitle = "by cyanideunderground & gem",
+   KeySystem = false
+})
+
+local TabScripts = Window:CreateTab("Scripts", 4483362458)
+local TabPilot = Window:CreateTab("Piloting", 4483362458)
+local TabNPC = Window:CreateTab("NPC", 4483362458)
+
+TabScripts:CreateButton({
+    Name = "Execute Infinite Stamina",
+    Callback = function()
+        local Players = game:GetService("Players")
+        local RunService = game:GetService("RunService")
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local LocalPlayer = Players.LocalPlayer
+        local StaminaRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("StaminaUpdate")
+        local SPRINT_SPEED = 25
+        local DEFAULT_SPEED = 16
+
+        for _, connection in pairs(getconnections(StaminaRemote.OnClientEvent)) do
+            pcall(function()
+                if connection.Disable then
+                    connection:Disable()
+                elseif pcall(function() return connection.Enabled end) then
+                    connection.Enabled = false
+                end
+            end)
+        end
+
+        task.spawn(function()
+            while true do
+                firesignal(StaminaRemote.OnClientEvent, 100, 100)
+                task.wait(0.1)
+            end
+        end)
+
+        RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChild("Humanoid")
+            local animator = hum and hum:FindFirstChild("Animator")
+            local entityFolder = workspace:FindFirstChild("Entities")
+            local myEntity = entityFolder and entityFolder:FindFirstChild(LocalPlayer.Name)
+            local targetAnim = myEntity and myEntity:FindFirstChild("RunningAnim")
+
+            if hum and animator and targetAnim then
+                local isRunningAnimActive = false
+                for _, track in pairs(animator:GetPlayingAnimationTracks()) do
+                    if track.Animation == targetAnim then
+                        isRunningAnimActive = true
+                        break
+                    end
+                end
+                if isRunningAnimActive then
+                    hum.WalkSpeed = SPRINT_SPEED
+                else
+                    if hum.WalkSpeed == SPRINT_SPEED then
+                        hum.WalkSpeed = DEFAULT_SPEED
+                    end
+                end
+            end
+        end)
+
+        print("[cyanide] Stamina updated to infinite.")
+    end,
+})
+
+-- Anti Recoil
+TabScripts:CreateButton({
+    Name = "Anti Recoil",
+    Callback = function()
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+        local VFXModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("VFXModule"))
+
+        if VFXModule and type(VFXModule.RequestRecoilShake) == "function" then
+            VFXModule.RequestRecoilShake = function() 
+                return nil 
+            end
+        end
+
+        local oldRequire
+        oldRequire = hookfunction(require, function(module)
+            local result = oldRequire(module)
+            
+            if type(result) == "table" then
+                -- Only modifying the visual/physical kick intensity
+                if result.ShakeIntensity then result.ShakeIntensity = 0 end
+                if result.ShakeDuration then result.ShakeDuration = 0 end
+                if result.AimingShakeMultiplier then result.AimingShakeMultiplier = 0 end
+            end
+            
+            return result
+        end)
+
+        local function ClearCurrentRecoil()
+            for _, v in pairs(game:GetDescendants()) do
+                if v:IsA("ModuleScript") and (v.Name == "ServerConfig" or v.Name == "ClientConfig") then
+                    pcall(function()
+                        local config = require(v)
+                        if type(config) == "table" then
+                            config.ShakeIntensity = 0
+                            config.ShakeDuration = 0
+                            config.AimingShakeMultiplier = 0
+                        end
+                    end)
+                end
+            end
+        end
+
+        task.spawn(ClearCurrentRecoil)
+        print("[cyanide] Recoil disabled.")
+    end,
+})
+
+-- Stands tab
+TabPilot:CreateLabel("Summon stand before piloting, equip item to stop piloting.")
+
+TabPilot:CreateButton({
+    Name = "Pilot Stand",
+    Callback = function()
+        local Event = game:GetService("ReplicatedStorage").Remotes.StandEvent
+        Event:FireServer(
+            "Ability",
+            "SilverChariot", 
+            "PilotMode",
+            Vector3.new(-6279.0595703125, 42.555206298828, -2270.2280273438)
+        )
+    end,
+})
+
+local PilotModule = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("StandPilotController"))
+
+local PilotStatsEnabled = false
+local InfiniteRangeEnabled = false
+local ActiveStatsTable = nil
+local OriginalStats = {}
+
+local MyPilotStats = {
+    SprintSpeed = 1200,
+    Speed = 600,
+}
+
+local function ApplyPilotStats()
+    if not ActiveStatsTable then return end
+    
+    if InfiniteRangeEnabled then
+        ActiveStatsTable.MaxRange = 9e18
+    else
+        if OriginalStats.MaxRange then
+            ActiveStatsTable.MaxRange = OriginalStats.MaxRange
+        end
+    end
+
+    if PilotStatsEnabled then
+        ActiveStatsTable.SprintSpeed = MyPilotStats.SprintSpeed
+        ActiveStatsTable.Speed = MyPilotStats.Speed
+        ActiveStatsTable.ReturnSpeed = MyPilotStats.ReturnSpeed or 65
+    else
+        if OriginalStats.Speed then
+            ActiveStatsTable.SprintSpeed = OriginalStats.SprintSpeed
+            ActiveStatsTable.Speed = OriginalStats.Speed
+            ActiveStatsTable.ReturnSpeed = OriginalStats.ReturnSpeed
+        end
+    end
+end
+
+local oldStart = PilotModule.StartPiloting
+
+PilotModule.StartPiloting = function(model, stats, controls)
+    if type(stats) == "table" then
+        ActiveStatsTable = stats
+        OriginalStats.MaxRange = stats.MaxRange
+        OriginalStats.SprintSpeed = stats.SprintSpeed
+        OriginalStats.Speed = stats.Speed
+        OriginalStats.ReturnSpeed = stats.ReturnSpeed
+
+        ApplyPilotStats()
+    end
+    return oldStart(model, stats, controls)
+end
+
+-- Independent Range Toggle
+TabPilot:CreateToggle({
+    Name = "Enable Infinite Pilot Range",
+    CurrentValue = false,
+    Flag = "InfiniteRangeToggle",
+    Callback = function(Value) 
+        InfiniteRangeEnabled = Value 
+        ApplyPilotStats() -- Updates instantly mid-flight
+    end,
+})
+
+-- Movement Stats Toggle
+local PilotToggle = TabPilot:CreateToggle({
+    Name = "Enable Custom Pilot Speed/Accel",
+    CurrentValue = false,
+    Flag = "PilotStatsToggle",
+    Callback = function(Value) 
+        PilotStatsEnabled = Value 
+        ApplyPilotStats() -- Updates instantly mid-flight
+    end,
+})
+
+TabPilot:CreateKeybind({
+    Name = "Toggle Pilot Speed Keybind",
+    CurrentKeybind = "P",
+    HoldToInteract = false,
+    Callback = function()
+        PilotToggle:Set(not PilotStatsEnabled)
+    end,
+})
+
+TabPilot:CreateSlider({
+    Name = "Sprint Speed", Range = {0, 5000}, Increment = 10, CurrentValue = 1200,
+    Callback = function(Value) 
+        MyPilotStats.SprintSpeed = Value 
+        if PilotStatsEnabled then ApplyPilotStats() end
+    end,
+})
+TabPilot:CreateSlider({
+    Name = "Speed", Range = {0, 5000}, Increment = 10, CurrentValue = 600,
+    Callback = function(Value) 
+        MyPilotStats.Speed = Value 
+        if PilotStatsEnabled then ApplyPilotStats() end
+    end,
+})
+
+TabNPC:CreateButton({
+    Name = "Read my fortune ($150)",
+    Callback = function()
+        local Event = game:GetService("ReplicatedStorage").Remotes.DialogueRemote
+        Event:FireServer(
+            "Action",
+            "StartSession",
+            workspace.NPC["Mud Witch"]
+        )
+    end,
+})
+
+TabNPC:CreateButton({
+    Name = "Restore my youth (1 Dogbane Herb)",
+    Callback = function()
+        local Event = game:GetService("ReplicatedStorage").Remotes.DialogueRemote
+        Event:FireServer(
+            "Action",
+            "GiveHerb_Age",
+            workspace.NPC["Mud Witch"]
+        )
+    end,
+})
+
+local confirmReset = false
+TabNPC:CreateButton({
+    Name = "Reset my stand (1 Dogbane Herb)",
+    Callback = function()
+        if not confirmReset then
+            confirmReset = true
+            Rayfield:Notify({Title = "Confirm", Content = "Click again within 3 seconds to reset stand.", Duration = 3})
+            task.delay(3, function() confirmReset = false end)
+        else
+            local Event = game:GetService("ReplicatedStorage").Remotes.DialogueRemote
+            Event:FireServer(
+                "Action",
+                "GiveHerb_Reset",
+                workspace.NPC["Mud Witch"]
+            )
+            confirmReset = false
+        end
+    end,
+})
