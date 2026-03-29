@@ -6,9 +6,10 @@ local Window = Rayfield:CreateWindow({
    KeySystem = false
 })
 
-local TabScripts = Window:CreateTab("Scripts", 4483362458)
-local TabPilot = Window:CreateTab("Piloting", 4483362458)
-local TabNPC = Window:CreateTab("NPC", 4483362458)
+local TabScripts = Window:CreateTab("Player Mods", 4483362458)
+local TabPilot = Window:CreateTab("Stand Mods", 4483362458)
+local TabHorse = Window:CreateTab("Horse Mods", 4483362458)
+local TabNPC = Window:CreateTab("Mud Witch", 4483362458)
 
 TabScripts:CreateButton({
     Name = "Execute Infinite Stamina",
@@ -284,3 +285,43 @@ TabNPC:CreateButton({
         end
     end,
 })
+
+TabHorse:CreateLabel("Remount your horse to apply updates.")
+
+TabHorse:CreateSlider({
+    Name = "Speed Multiplier",
+    Range = {1, 10},
+    Increment = 0.1,
+    Suffix = "x",
+    CurrentValue = 2.5,
+    Flag = "HorseSpeedSlider", 
+    Callback = function(Value)
+        HorseConfig.SpeedMultiplier = Value
+        updateHorses()
+    end,
+})
+
+TabHorse:CreateSlider({
+    Name = "Jump Multiplier",
+    Range = {1, 10},
+    Increment = 0.1,
+    Suffix = "x",
+    CurrentValue = 2,
+    Flag = "HorseJumpSlider", 
+    Callback = function(Value)
+        HorseConfig.JumpMultiplier = Value
+        updateHorses()
+    end,
+})
+
+TabHorse:CreateToggle({
+    Name = "Infinite Stamina",
+    CurrentValue = true,
+    Flag = "HorseStaminaToggle",
+    Callback = function(Value)
+        HorseConfig.InfiniteStamina = Value
+        updateHorses()
+    end,
+})
+
+updateHorses()
