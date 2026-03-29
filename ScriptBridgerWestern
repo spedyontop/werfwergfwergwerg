@@ -11,6 +11,66 @@ local TabPilot = Window:CreateTab("Stand Mods", 4483362458)
 local TabHorse = Window:CreateTab("Horse Mods", 4483362458)
 local TabNPC = Window:CreateTab("Mud Witch", 4483362458)
 
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local HorseConfig = {
+    SpeedMultiplier = 2.5,
+    JumpMultiplier = 2,
+    InfiniteStamina = true
+}
+
+local function updateHorses()
+    local staminaValue = HorseConfig.InfiniteStamina and 99999 or 1 
+
+    for _, instance in pairs(workspace:GetDescendants()) do
+        if instance:IsA("Model") and instance:GetAttribute("Stat_Speed") ~= nil then
+            instance:SetAttribute("Stat_Speed", HorseConfig.SpeedMultiplier)
+            instance:SetAttribute("Stat_Jump", HorseConfig.JumpMultiplier)
+            instance:SetAttribute("Stat_Stamina", staminaValue)
+        end
+    end
+end
+
+workspace.DescendantAdded:Connect(function(instance)
+    task.wait(0.5)
+    if instance:IsA("Model") and instance:GetAttribute("Stat_Speed") ~= nil then
+        local staminaValue = HorseConfig.InfiniteStamina and 99999 or 1
+        instance:SetAttribute("Stat_Speed", HorseConfig.SpeedMultiplier)
+        instance:SetAttribute("Stat_Jump", HorseConfig.JumpMultiplier)
+        instance:SetAttribute("Stat_Stamina", staminaValue)
+    end
+end)
+
+task.spawn(function()
+    local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+    
+    while task.wait(0.5) do
+        local HorseControlGui = PlayerGui:FindFirstChild("HorseControlGui")
+        if HorseControlGui then
+            local StaminaBar = HorseControlGui:FindFirstChild("StaminaBar")
+            local StaminaFill = StaminaBar and StaminaBar:FindFirstChild("StaminaFill")
+            
+            if StaminaFill and not StaminaFill:GetAttribute("SizeLockHooked") then
+                StaminaFill:SetAttribute("SizeLockHooked", true)
+                
+                StaminaFill:GetPropertyChangedSignal("Size"):Connect(function()
+                    if HorseConfig.InfiniteStamina then
+                        local lockedSize = UDim2.new(1, 0, 1, 0)
+                        if StaminaFill.Size ~= lockedSize then
+                            StaminaFill.Size = lockedSize
+                        end
+                    end
+                end)
+                
+                if HorseConfig.InfiniteStamina then
+                    StaminaFill.Size = UDim2.new(1, 0, 1, 0)
+                end
+            end
+        end
+    end
+end)
+
 TabScripts:CreateButton({
     Name = "Execute Infinite Stamina",
     Callback = function()
