@@ -14,56 +14,68 @@ TabScripts:CreateButton({
     Name = "Execute Infinite Stamina",
     Callback = function()
         local Players = game:GetService("Players")
-        local RunService = game:GetService("RunService")
-        local ReplicatedStorage = game:GetService("ReplicatedStorage")
-        local LocalPlayer = Players.LocalPlayer
-        local StaminaRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("StaminaUpdate")
-        local SPRINT_SPEED = 25
-        local DEFAULT_SPEED = 16
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-        for _, connection in pairs(getconnections(StaminaRemote.OnClientEvent)) do
-            pcall(function()
-                if connection.Disable then
-                    connection:Disable()
-                elseif pcall(function() return connection.Enabled end) then
-                    connection.Enabled = false
-                end
-            end)
+local LocalPlayer = Players.LocalPlayer
+local StaminaRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("StaminaUpdate")
+
+local SPRINT_SPEED = 25
+local DEFAULT_SPEED = 16
+
+local entityFolder = workspace:FindFirstChild("Entities")
+local myEntity = nil
+local targetAnim = nil
+
+for _, connection in pairs(getconnections(StaminaRemote.OnClientEvent)) do
+    pcall(function()
+        if connection.Disable then
+            connection:Disable()
+        elseif pcall(function() return connection.Enabled end) then
+            connection.Enabled = false
+        end
+    end)
+end
+
+task.spawn(function()
+    while true do
+        firesignal(StaminaRemote.OnClientEvent, 100, 100)
+        task.wait(0.1)
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChild("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+    
+    if not myEntity or myEntity.Parent ~= entityFolder then
+        myEntity = entityFolder and entityFolder:FindFirstChild(LocalPlayer.Name)
+        targetAnim = myEntity and myEntity:FindFirstChild("RunningAnim")
+    end
+
+    local animator = hum:FindFirstChild("Animator")
+    if animator and targetAnim then
+        local isRunningAnimActive = false
+        
+        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+            if track.Animation == targetAnim then
+                isRunningAnimActive = true
+                break
+            end
         end
 
-        task.spawn(function()
-            while true do
-                firesignal(StaminaRemote.OnClientEvent, 100, 100)
-                task.wait(0.1)
+        if isRunningAnimActive then
+            if hum.WalkSpeed ~= SPRINT_SPEED then
+                hum.WalkSpeed = SPRINT_SPEED
             end
-        end)
-
-        RunService.Heartbeat:Connect(function()
-            local char = LocalPlayer.Character
-            local hum = char and char:FindFirstChild("Humanoid")
-            local animator = hum and hum:FindFirstChild("Animator")
-            local entityFolder = workspace:FindFirstChild("Entities")
-            local myEntity = entityFolder and entityFolder:FindFirstChild(LocalPlayer.Name)
-            local targetAnim = myEntity and myEntity:FindFirstChild("RunningAnim")
-
-            if hum and animator and targetAnim then
-                local isRunningAnimActive = false
-                for _, track in pairs(animator:GetPlayingAnimationTracks()) do
-                    if track.Animation == targetAnim then
-                        isRunningAnimActive = true
-                        break
-                    end
-                end
-                if isRunningAnimActive then
-                    hum.WalkSpeed = SPRINT_SPEED
-                else
-                    if hum.WalkSpeed == SPRINT_SPEED then
-                        hum.WalkSpeed = DEFAULT_SPEED
-                    end
-                end
+        else
+            if hum.WalkSpeed == SPRINT_SPEED then
+                hum.WalkSpeed = DEFAULT_SPEED
             end
-        end)
-
+        end
+    end
+end)
         print("[cyanide] Stamina updated to infinite.")
     end,
 })
