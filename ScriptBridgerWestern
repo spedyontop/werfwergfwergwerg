@@ -196,7 +196,7 @@ TabPilot:CreateToggle({
 
 -- Movement Stats Toggle
 local PilotToggle = TabPilot:CreateToggle({
-    Name = "Enable Custom Pilot Speed/Accel",
+    Name = "Enable Custom Pilot Speed",
     CurrentValue = false,
     Flag = "PilotStatsToggle",
     Callback = function(Value) 
