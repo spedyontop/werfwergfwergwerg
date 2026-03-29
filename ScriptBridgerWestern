@@ -6,86 +6,157 @@ local Window = Rayfield:CreateWindow({
    KeySystem = false
 })
 
-local TabScripts = Window:CreateTab("Scripts", 4483362458)
-local TabPilot = Window:CreateTab("Piloting", 4483362458)
-local TabNPC = Window:CreateTab("NPC", 4483362458)
+local TabScripts = Window:CreateTab("Player Mods", 4483362458)
+local TabPilot = Window:CreateTab("Stand Mods", 4483362458)
+local TabHorse = Window:CreateTab("Horse Mods", 4483362458)
+local TabNPC = Window:CreateTab("Mud Witch", 4483362458)
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local HorseConfig = {
+    SpeedMultiplier = 2.5,
+    JumpMultiplier = 2,
+    InfiniteStamina = true
+}
+
+local HorseCache = {}
+
+for _, instance in pairs(workspace:GetDescendants()) do
+    if instance:IsA("Model") and instance:GetAttribute("Stat_Speed") ~= nil then
+        table.insert(HorseCache, instance)
+    end
+end
+
+local function updateHorses()
+    local staminaValue = HorseConfig.InfiniteStamina and 99999 or 1 
+
+    for i = #HorseCache, 1, -1 do
+        local horse = HorseCache[i]
+        if horse and horse.Parent then
+            horse:SetAttribute("Stat_Speed", HorseConfig.SpeedMultiplier)
+            horse:SetAttribute("Stat_Jump", HorseConfig.JumpMultiplier)
+            horse:SetAttribute("Stat_Stamina", staminaValue)
+        else
+            -- Horse was deleted from the game, remove from our cache
+            table.remove(HorseCache, i)
+        end
+    end
+end
+
+workspace.DescendantAdded:Connect(function(instance)
+    task.wait(0.5)
+    if instance:IsA("Model") and instance:GetAttribute("Stat_Speed") ~= nil then
+        -- Add new horses to our cache as they spawn
+        table.insert(HorseCache, instance)
+        
+        local staminaValue = HorseConfig.InfiniteStamina and 99999 or 1
+        instance:SetAttribute("Stat_Speed", HorseConfig.SpeedMultiplier)
+        instance:SetAttribute("Stat_Jump", HorseConfig.JumpMultiplier)
+        instance:SetAttribute("Stat_Stamina", staminaValue)
+    end
+end)
+
+task.spawn(function()
+    local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+    
+    while task.wait(0.5) do
+        local HorseControlGui = PlayerGui:FindFirstChild("HorseControlGui")
+        if HorseControlGui then
+            local StaminaBar = HorseControlGui:FindFirstChild("StaminaBar")
+            local StaminaFill = StaminaBar and StaminaBar:FindFirstChild("StaminaFill")
+            
+            if StaminaFill and not StaminaFill:GetAttribute("SizeLockHooked") then
+                StaminaFill:SetAttribute("SizeLockHooked", true)
+                
+                StaminaFill:GetPropertyChangedSignal("Size"):Connect(function()
+                    if HorseConfig.InfiniteStamina then
+                        local lockedSize = UDim2.new(1, 0, 1, 0)
+                        if StaminaFill.Size ~= lockedSize then
+                            StaminaFill.Size = lockedSize
+                        end
+                    end
+                end)
+                
+                if HorseConfig.InfiniteStamina then
+                    StaminaFill.Size = UDim2.new(1, 0, 1, 0)
+                end
+            end
+        end
+    end
+end)
 
 TabScripts:CreateButton({
     Name = "Execute Infinite Stamina",
     Callback = function()
-        local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local RunService = game:GetService("RunService")
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local StaminaRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("StaminaUpdate")
 
-local LocalPlayer = Players.LocalPlayer
-local StaminaRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("StaminaUpdate")
+        local SPRINT_SPEED = 25
+        local DEFAULT_SPEED = 16
 
-local SPRINT_SPEED = 25
-local DEFAULT_SPEED = 16
+        local entityFolder = workspace:FindFirstChild("Entities")
+        local myEntity = nil
+        local targetAnim = nil
 
-local entityFolder = workspace:FindFirstChild("Entities")
-local myEntity = nil
-local targetAnim = nil
-
-for _, connection in pairs(getconnections(StaminaRemote.OnClientEvent)) do
-    pcall(function()
-        if connection.Disable then
-            connection:Disable()
-        elseif pcall(function() return connection.Enabled end) then
-            connection.Enabled = false
-        end
-    end)
-end
-
-task.spawn(function()
-    while true do
-        firesignal(StaminaRemote.OnClientEvent, 100, 100)
-        task.wait(0.1)
-    end
-end)
-
-RunService.Heartbeat:Connect(function()
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-    if not hum or hum.Health <= 0 then return end
-    
-    if not myEntity or myEntity.Parent ~= entityFolder then
-        myEntity = entityFolder and entityFolder:FindFirstChild(LocalPlayer.Name)
-        targetAnim = myEntity and myEntity:FindFirstChild("RunningAnim")
-    end
-
-    local animator = hum:FindFirstChild("Animator")
-    if animator and targetAnim then
-        local isRunningAnimActive = false
-        
-        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-            if track.Animation == targetAnim then
-                isRunningAnimActive = true
-                break
-            end
+        for _, connection in pairs(getconnections(StaminaRemote.OnClientEvent)) do
+            pcall(function()
+                if connection.Disable then
+                    connection:Disable()
+                elseif pcall(function() return connection.Enabled end) then
+                    connection.Enabled = false
+                end
+            end)
         end
 
-        if isRunningAnimActive then
-            if hum.WalkSpeed ~= SPRINT_SPEED then
-                hum.WalkSpeed = SPRINT_SPEED
+        task.spawn(function()
+            while true do
+                firesignal(StaminaRemote.OnClientEvent, 100, 100)
+                task.wait(0.1)
             end
-        else
-            if hum.WalkSpeed == SPRINT_SPEED then
-                hum.WalkSpeed = DEFAULT_SPEED
+        end)
+
+        RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChild("Humanoid")
+            if not hum or hum.Health <= 0 then return end
+            
+            if not myEntity or myEntity.Parent ~= entityFolder then
+                myEntity = entityFolder and entityFolder:FindFirstChild(LocalPlayer.Name)
+                targetAnim = myEntity and myEntity:FindFirstChild("RunningAnim")
             end
-        end
-    end
-end)
+
+            local animator = hum:FindFirstChild("Animator")
+            if animator and targetAnim then
+                local isRunningAnimActive = false
+                
+                for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                    if track.Animation == targetAnim then
+                        isRunningAnimActive = true
+                        break
+                    end
+                end
+
+                if isRunningAnimActive then
+                    if hum.WalkSpeed ~= SPRINT_SPEED then
+                        hum.WalkSpeed = SPRINT_SPEED
+                    end
+                else
+                    if hum.WalkSpeed == SPRINT_SPEED then
+                        hum.WalkSpeed = DEFAULT_SPEED
+                    end
+                end
+            end
+        end)
         print("[cyanide] Stamina updated to infinite.")
     end,
 })
 
--- Anti Recoil
 TabScripts:CreateButton({
     Name = "Anti Recoil",
     Callback = function()
         local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
         local VFXModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("VFXModule"))
 
         if VFXModule and type(VFXModule.RequestRecoilShake) == "function" then
@@ -97,14 +168,11 @@ TabScripts:CreateButton({
         local oldRequire
         oldRequire = hookfunction(require, function(module)
             local result = oldRequire(module)
-            
             if type(result) == "table" then
-                -- Only modifying the visual/physical kick intensity
                 if result.ShakeIntensity then result.ShakeIntensity = 0 end
                 if result.ShakeDuration then result.ShakeDuration = 0 end
                 if result.AimingShakeMultiplier then result.AimingShakeMultiplier = 0 end
             end
-            
             return result
         end)
 
@@ -128,7 +196,6 @@ TabScripts:CreateButton({
     end,
 })
 
--- Stands tab
 TabPilot:CreateLabel("Summon stand before piloting, equip item to stop piloting.")
 
 TabPilot:CreateButton({
@@ -195,25 +262,23 @@ PilotModule.StartPiloting = function(model, stats, controls)
     return oldStart(model, stats, controls)
 end
 
--- Independent Range Toggle
 TabPilot:CreateToggle({
     Name = "Enable Infinite Pilot Range",
     CurrentValue = false,
     Flag = "InfiniteRangeToggle",
     Callback = function(Value) 
         InfiniteRangeEnabled = Value 
-        ApplyPilotStats() -- Updates instantly mid-flight
+        ApplyPilotStats() 
     end,
 })
 
--- Movement Stats Toggle
 local PilotToggle = TabPilot:CreateToggle({
     Name = "Enable Custom Pilot Speed",
     CurrentValue = false,
     Flag = "PilotStatsToggle",
     Callback = function(Value) 
         PilotStatsEnabled = Value 
-        ApplyPilotStats() -- Updates instantly mid-flight
+        ApplyPilotStats() 
     end,
 })
 
@@ -284,3 +349,43 @@ TabNPC:CreateButton({
         end
     end,
 })
+
+TabHorse:CreateLabel("Remount your horse to apply updates.")
+
+TabHorse:CreateSlider({
+    Name = "Speed Multiplier",
+    Range = {1, 10},
+    Increment = 0.1,
+    Suffix = "x",
+    CurrentValue = 2.5,
+    Flag = "HorseSpeedSlider", 
+    Callback = function(Value)
+        HorseConfig.SpeedMultiplier = Value
+        updateHorses()
+    end,
+})
+
+TabHorse:CreateSlider({
+    Name = "Jump Multiplier",
+    Range = {1, 10},
+    Increment = 0.1,
+    Suffix = "x",
+    CurrentValue = 2,
+    Flag = "HorseJumpSlider", 
+    Callback = function(Value)
+        HorseConfig.JumpMultiplier = Value
+        updateHorses()
+    end,
+})
+
+TabHorse:CreateToggle({
+    Name = "Infinite Stamina",
+    CurrentValue = true,
+    Flag = "HorseStaminaToggle",
+    Callback = function(Value)
+        HorseConfig.InfiniteStamina = Value
+        updateHorses()
+    end,
+})
+
+updateHorses()
