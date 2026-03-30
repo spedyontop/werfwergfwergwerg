@@ -1,0 +1,695 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local VirtualUser = game:GetService("VirtualUser")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+
+local THEME = {
+    Background = Color3.fromRGB(10, 10, 15),
+    CardBg = Color3.fromRGB(22, 22, 30),
+    Border = Color3.fromRGB(45, 45, 60),
+    Accent = Color3.fromRGB(255, 200, 0),
+    AccentDim = Color3.fromRGB(255, 110, 0),
+    TextMain = Color3.fromRGB(255, 255, 255),
+    TextMuted = Color3.fromRGB(150, 150, 180),
+    Warning = Color3.fromRGB(255, 50, 50),
+    Success = Color3.fromRGB(0, 230, 255)
+}
+
+local States = {
+    Farming = false,
+    AutoRedeem = false,
+    AutoDeposit = false,
+    Webhook = false
+}
+local WebhookURL = ""
+local TargetItems = {}
+local bountiesCompleted = 0
+
+local GUI_NAME = "Cyanides_Auto_Bounty"
+local TargetGui = (gethui and gethui()) or CoreGui
+if TargetGui:FindFirstChild(GUI_NAME) then TargetGui[GUI_NAME]:Destroy() end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = GUI_NAME
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = TargetGui
+
+local MainCanvas = Instance.new("CanvasGroup")
+MainCanvas.Size = UDim2.new(0, 520, 0, 310)
+MainCanvas.Position = UDim2.new(0.5, -260, 0.5, -155)
+MainCanvas.BackgroundColor3 = THEME.Background
+MainCanvas.BorderSizePixel = 0
+MainCanvas.GroupTransparency = 1
+MainCanvas.Parent = ScreenGui
+
+Instance.new("UICorner", MainCanvas).CornerRadius = UDim.new(0, 12)
+
+local BorderStroke = Instance.new("UIStroke", MainCanvas)
+BorderStroke.Color = Color3.fromRGB(255, 255, 255)
+BorderStroke.Thickness = 2
+
+local BorderGradient = Instance.new("UIGradient", BorderStroke)
+BorderGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, THEME.Background),
+    ColorSequenceKeypoint.new(0.5, THEME.Accent),
+    ColorSequenceKeypoint.new(1, THEME.Background)
+}
+RunService.RenderStepped:Connect(function()
+    BorderGradient.Rotation = (BorderGradient.Rotation + 1) % 360
+end)
+
+local TopBar = Instance.new("Frame", MainCanvas)
+TopBar.Size = UDim2.new(1, 0, 0, 40)
+TopBar.BackgroundTransparency = 1
+
+local Title = Instance.new("TextLabel", TopBar)
+Title.Size = UDim2.new(1, -30, 1, 0)
+Title.Position = UDim2.new(0, 20, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "CYANIDE'S AUTO BOUNTY"
+Title.TextColor3 = THEME.TextMain
+Title.Font = Enum.Font.GothamBlack
+Title.TextSize = 14
+Title.TextXAlignment = Enum.TextXAlignment.Left
+
+local dragging, dragInput, dragStart, startPos
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true; dragStart = input.Position; startPos = MainCanvas.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+TopBar.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainCanvas.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local Divider = Instance.new("Frame", MainCanvas)
+Divider.Size = UDim2.new(1, 0, 0, 1)
+Divider.Position = UDim2.new(0, 0, 0, 40)
+Divider.BackgroundColor3 = THEME.Border
+Divider.BorderSizePixel = 0
+
+local LeftPanel = Instance.new("Frame", MainCanvas)
+LeftPanel.Size = UDim2.new(0, 140, 1, -41)
+LeftPanel.Position = UDim2.new(0, 0, 0, 41)
+LeftPanel.BackgroundTransparency = 1
+
+local ToggleBg = Instance.new("Frame", LeftPanel)
+ToggleBg.Size = UDim2.new(0, 80, 0, 40)
+ToggleBg.Position = UDim2.new(0.5, -40, 0.4, -20)
+ToggleBg.BackgroundColor3 = THEME.CardBg
+Instance.new("UICorner", ToggleBg).CornerRadius = UDim.new(1, 0)
+local ToggleStroke = Instance.new("UIStroke", ToggleBg)
+ToggleStroke.Color = THEME.Border; ToggleStroke.Thickness = 2
+
+local ToggleKnob = Instance.new("Frame", ToggleBg)
+ToggleKnob.Size = UDim2.new(0, 30, 0, 30)
+ToggleKnob.Position = UDim2.new(0, 5, 0.5, -15)
+ToggleKnob.BackgroundColor3 = THEME.TextMuted
+Instance.new("UICorner", ToggleKnob).CornerRadius = UDim.new(1, 0)
+
+local MainToggleBtn = Instance.new("TextButton", ToggleBg)
+MainToggleBtn.Size = UDim2.new(1, 0, 1, 0)
+MainToggleBtn.BackgroundTransparency = 1
+MainToggleBtn.Text = ""
+
+local StatusLabel = Instance.new("TextLabel", LeftPanel)
+StatusLabel.Size = UDim2.new(1, 0, 0, 20)
+StatusLabel.Position = UDim2.new(0, 0, 0.4, 30)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "SYSTEM IDLE"
+StatusLabel.TextColor3 = THEME.TextMuted
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.TextSize = 11
+
+local RightPanel = Instance.new("Frame", MainCanvas)
+RightPanel.Size = UDim2.new(1, -140, 1, -41)
+RightPanel.Position = UDim2.new(0, 140, 0, 41)
+RightPanel.BackgroundTransparency = 1
+
+local VertDivider = Instance.new("Frame", RightPanel)
+VertDivider.Size = UDim2.new(0, 1, 1, -30)
+VertDivider.Position = UDim2.new(0, 0, 0, 15)
+VertDivider.BackgroundColor3 = THEME.Border
+VertDivider.BorderSizePixel = 0
+
+local TabMenu = Instance.new("Frame", RightPanel)
+TabMenu.Size = UDim2.new(1, -20, 0, 30)
+TabMenu.Position = UDim2.new(0, 15, 0, 10)
+TabMenu.BackgroundTransparency = 1
+
+local function CreateTabBtn(name, posX)
+    local Btn = Instance.new("TextButton", TabMenu)
+    Btn.Size = UDim2.new(0, 80, 1, 0)
+    Btn.Position = UDim2.new(0, posX, 0, 0)
+    Btn.BackgroundTransparency = 1
+    Btn.Text = name
+    Btn.TextColor3 = THEME.TextMuted
+    Btn.Font = Enum.Font.GothamBold
+    Btn.TextSize = 12
+    
+    local Indicator = Instance.new("Frame", Btn)
+    Indicator.Size = UDim2.new(0, 0, 0, 2)
+    Indicator.Position = UDim2.new(0.5, 0, 1, -2)
+    Indicator.BackgroundColor3 = THEME.Accent
+    Indicator.BorderSizePixel = 0
+    Indicator.AnchorPoint = Vector2.new(0.5, 0)
+    
+    return Btn, Indicator
+end
+
+local TabCombatBtn, IndCombat = CreateTabBtn("COMBAT", 0)
+local TabVaultBtn, IndVault = CreateTabBtn("VAULT", 90)
+local TabUplinkBtn, IndUplink = CreateTabBtn("UPLINK", 180)
+
+local ContainerCombat = Instance.new("Frame", RightPanel)
+ContainerCombat.Size = UDim2.new(1, -20, 1, -50)
+ContainerCombat.Position = UDim2.new(0, 15, 0, 45)
+ContainerCombat.BackgroundTransparency = 1
+
+local ContainerVault = Instance.new("Frame", RightPanel)
+ContainerVault.Size = UDim2.new(1, -20, 1, -50)
+ContainerVault.Position = UDim2.new(0, 15, 0, 45)
+ContainerVault.BackgroundTransparency = 1
+ContainerVault.Visible = false
+
+local ContainerUplink = Instance.new("Frame", RightPanel)
+ContainerUplink.Size = UDim2.new(1, -20, 1, -50)
+ContainerUplink.Position = UDim2.new(0, 15, 0, 45)
+ContainerUplink.BackgroundTransparency = 1
+ContainerUplink.Visible = false
+
+local function SwitchTab(activeContainer, activeInd, activeBtn)
+    for _, c in ipairs({ContainerCombat, ContainerVault, ContainerUplink}) do c.Visible = (c == activeContainer) end
+    for _, i in ipairs({IndCombat, IndVault, IndUplink}) do TweenService:Create(i, TweenInfo.new(0.3), {Size = UDim2.new(0, 0, 0, 2)}):Play() end
+    for _, b in ipairs({TabCombatBtn, TabVaultBtn, TabUplinkBtn}) do TweenService:Create(b, TweenInfo.new(0.3), {TextColor3 = THEME.TextMuted}):Play() end
+    
+    TweenService:Create(activeInd, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(1, -20, 0, 2)}):Play()
+    TweenService:Create(activeBtn, TweenInfo.new(0.3), {TextColor3 = THEME.Accent}):Play()
+end
+
+TabCombatBtn.MouseButton1Click:Connect(function() SwitchTab(ContainerCombat, IndCombat, TabCombatBtn) end)
+TabVaultBtn.MouseButton1Click:Connect(function() SwitchTab(ContainerVault, IndVault, TabVaultBtn) end)
+TabUplinkBtn.MouseButton1Click:Connect(function() SwitchTab(ContainerUplink, IndUplink, TabUplinkBtn) end)
+SwitchTab(ContainerCombat, IndCombat, TabCombatBtn)
+
+local function CreateMiniToggle(parent, posY, title, stateKey)
+    local Frame = Instance.new("Frame", parent)
+    Frame.Size = UDim2.new(1, 0, 0, 30)
+    Frame.Position = UDim2.new(0, 0, 0, posY)
+    Frame.BackgroundTransparency = 1
+    
+    local Label = Instance.new("TextLabel", Frame)
+    Label.Size = UDim2.new(1, -50, 1, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = title
+    Label.TextColor3 = THEME.TextMain
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local TBg = Instance.new("Frame", Frame)
+    TBg.Size = UDim2.new(0, 40, 0, 20)
+    TBg.Position = UDim2.new(1, -40, 0.5, -10)
+    TBg.BackgroundColor3 = THEME.CardBg
+    Instance.new("UICorner", TBg).CornerRadius = UDim.new(1, 0)
+    local TStroke = Instance.new("UIStroke", TBg)
+    TStroke.Color = THEME.Border
+    
+    local TKnob = Instance.new("Frame", TBg)
+    TKnob.Size = UDim2.new(0, 14, 0, 14)
+    TKnob.Position = UDim2.new(0, 3, 0.5, -7)
+    TKnob.BackgroundColor3 = THEME.TextMuted
+    Instance.new("UICorner", TKnob).CornerRadius = UDim.new(1, 0)
+    
+    local Btn = Instance.new("TextButton", TBg)
+    Btn.Size = UDim2.new(1, 0, 1, 0)
+    Btn.BackgroundTransparency = 1
+    Btn.Text = ""
+    
+    Btn.MouseButton1Click:Connect(function()
+        States[stateKey] = not States[stateKey]
+        local tInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        if States[stateKey] then
+            TweenService:Create(TKnob, tInfo, {Position = UDim2.new(1, -17, 0.5, -7), BackgroundColor3 = THEME.TextMain}):Play()
+            TweenService:Create(TBg, tInfo, {BackgroundColor3 = THEME.AccentDim}):Play()
+            TweenService:Create(TStroke, tInfo, {Color = THEME.Accent}):Play()
+        else
+            TweenService:Create(TKnob, tInfo, {Position = UDim2.new(0, 3, 0.5, -7), BackgroundColor3 = THEME.TextMuted}):Play()
+            TweenService:Create(TBg, tInfo, {BackgroundColor3 = THEME.CardBg}):Play()
+            TweenService:Create(TStroke, tInfo, {Color = THEME.Border}):Play()
+        end
+    end)
+end
+
+local function CreateCard(parent, posY, width, titleTxt, valTxt)
+    local Card = Instance.new("Frame", parent)
+    Card.Size = UDim2.new(width, 0, 0, 50)
+    Card.Position = UDim2.new(0, 0, 0, posY)
+    Card.BackgroundColor3 = THEME.CardBg
+    Instance.new("UICorner", Card).CornerRadius = UDim.new(0, 6)
+    Instance.new("UIStroke", Card).Color = THEME.Border
+
+    local Title = Instance.new("TextLabel", Card)
+    Title.Size = UDim2.new(1, -20, 0, 20)
+    Title.Position = UDim2.new(0, 10, 0, 5)
+    Title.BackgroundTransparency = 1
+    Title.Text = titleTxt
+    Title.TextColor3 = THEME.TextMuted
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = 10
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+
+    local Value = Instance.new("TextLabel", Card)
+    Value.Size = UDim2.new(1, -20, 1, -25)
+    Value.Position = UDim2.new(0, 10, 0, 20)
+    Value.BackgroundTransparency = 1
+    Value.Text = valTxt
+    Value.TextColor3 = THEME.TextMain
+    Value.Font = Enum.Font.GothamMedium
+    Value.TextSize = 13
+    Value.TextXAlignment = Enum.TextXAlignment.Left
+    return Value, Card
+end
+
+local TargetVal, TargetCard = CreateCard(ContainerCombat, 0, 0.55, "ACTIVE TARGET", "Loading...")
+local StatsVal, StatsCard = CreateCard(ContainerCombat, 0, 0.42, "YIELD METRICS", "Completed: 0")
+StatsCard.Position = UDim2.new(0.58, 0, 0, 0)
+
+local LogBox = Instance.new("Frame", ContainerCombat)
+LogBox.Size = UDim2.new(1, 0, 1, -60)
+LogBox.Position = UDim2.new(0, 0, 0, 60)
+LogBox.BackgroundColor3 = THEME.CardBg
+Instance.new("UICorner", LogBox).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", LogBox).Color = THEME.Border
+
+local LogText = Instance.new("TextLabel", LogBox)
+LogText.Size = UDim2.new(1, -20, 1, -10)
+LogText.Position = UDim2.new(0, 10, 0, 5)
+LogText.BackgroundTransparency = 1
+LogText.Text = "> Core initialized."
+LogText.TextColor3 = THEME.Accent
+LogText.Font = Enum.Font.Code
+LogText.TextSize = 11
+LogText.TextWrapped = true
+LogText.TextXAlignment = Enum.TextXAlignment.Left
+LogText.TextYAlignment = Enum.TextYAlignment.Top
+
+local function Log(msg) LogText.Text = "> " .. msg end
+
+CreateMiniToggle(ContainerVault, 0, "Auto Deposit (Pouch) [5s]", "AutoDeposit")
+CreateMiniToggle(ContainerVault, 35, "Enable Auto Redeem", "AutoRedeem")
+
+local RedeemInput = Instance.new("TextBox", ContainerVault)
+RedeemInput.Size = UDim2.new(0.7, -5, 0, 30)
+RedeemInput.Position = UDim2.new(0, 0, 0, 75)
+RedeemInput.BackgroundColor3 = THEME.CardBg
+RedeemInput.PlaceholderText = "Enter Item Name..."
+RedeemInput.Text = ""
+RedeemInput.TextColor3 = THEME.TextMain
+RedeemInput.Font = Enum.Font.Gotham
+RedeemInput.TextSize = 12
+RedeemInput.ClearTextOnFocus = false
+Instance.new("UICorner", RedeemInput).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", RedeemInput).Color = THEME.Border
+
+local AddBtn = Instance.new("TextButton", ContainerVault)
+AddBtn.Size = UDim2.new(0.3, 0, 0, 30)
+AddBtn.Position = UDim2.new(0.7, 5, 0, 75)
+AddBtn.BackgroundColor3 = THEME.CardBg
+AddBtn.Text = "ADD ITEM"
+AddBtn.TextColor3 = THEME.Accent
+AddBtn.Font = Enum.Font.GothamBold
+AddBtn.TextSize = 11
+Instance.new("UICorner", AddBtn).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", AddBtn).Color = THEME.Border
+
+local ItemList = Instance.new("ScrollingFrame", ContainerVault)
+ItemList.Size = UDim2.new(1, 0, 1, -115)
+ItemList.Position = UDim2.new(0, 0, 0, 115)
+ItemList.BackgroundTransparency = 1
+ItemList.ScrollBarThickness = 2
+local ListLayout = Instance.new("UIListLayout", ItemList)
+ListLayout.Padding = UDim.new(0, 5)
+
+local function formatString(str) return tostring(str):lower():match("^%s*(.-)%s*$") end
+
+local function RefreshItemList()
+    for _, c in ipairs(ItemList:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+    local yOff = 0
+    for formattedName, rawName in pairs(TargetItems) do
+        local Itm = Instance.new("Frame", ItemList)
+        Itm.Size = UDim2.new(1, -8, 0, 26)
+        Itm.BackgroundColor3 = THEME.CardBg
+        Instance.new("UICorner", Itm).CornerRadius = UDim.new(0, 4)
+        
+        local txt = Instance.new("TextLabel", Itm)
+        txt.Size = UDim2.new(1, -30, 1, 0)
+        txt.Position = UDim2.new(0, 10, 0, 0)
+        txt.BackgroundTransparency = 1
+        txt.Text = rawName
+        txt.TextColor3 = THEME.TextMain
+        txt.Font = Enum.Font.Code
+        txt.TextSize = 12
+        txt.TextXAlignment = Enum.TextXAlignment.Left
+        
+        local Del = Instance.new("TextButton", Itm)
+        Del.Size = UDim2.new(0, 20, 0, 20)
+        Del.Position = UDim2.new(1, -25, 0.5, -10)
+        Del.BackgroundTransparency = 1
+        Del.Text = "X"
+        Del.TextColor3 = THEME.Warning
+        Del.Font = Enum.Font.GothamBold
+        Del.MouseButton1Click:Connect(function() TargetItems[formattedName] = nil; RefreshItemList() end)
+        
+        yOff = yOff + 31
+    end
+    ItemList.CanvasSize = UDim2.new(0, 0, 0, yOff)
+end
+
+AddBtn.MouseButton1Click:Connect(function()
+    local raw = RedeemInput.Text
+    local fmt = formatString(raw)
+    if fmt ~= "" and not TargetItems[fmt] then
+        TargetItems[fmt] = raw; RedeemInput.Text = ""; RefreshItemList()
+    end
+end)
+
+CreateMiniToggle(ContainerUplink, 0, "Broadcast to Webhook [60s]", "Webhook")
+
+local WebhookLabel = Instance.new("TextLabel", ContainerUplink)
+WebhookLabel.Size = UDim2.new(1, 0, 0, 20)
+WebhookLabel.Position = UDim2.new(0, 0, 0, 45)
+WebhookLabel.BackgroundTransparency = 1
+WebhookLabel.Text = "WEBHOOK URL"
+WebhookLabel.TextColor3 = THEME.TextMuted
+WebhookLabel.Font = Enum.Font.GothamBold
+WebhookLabel.TextSize = 11
+WebhookLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local WebhookInput = Instance.new("TextBox", ContainerUplink)
+WebhookInput.Size = UDim2.new(1, 0, 0, 35)
+WebhookInput.Position = UDim2.new(0, 0, 0, 65)
+WebhookInput.BackgroundColor3 = THEME.CardBg
+WebhookInput.PlaceholderText = "https://discord.com/api/webhooks/..."
+WebhookInput.Text = ""
+WebhookInput.TextColor3 = THEME.TextMain
+WebhookInput.Font = Enum.Font.Code
+WebhookInput.TextSize = 11
+WebhookInput.ClearTextOnFocus = false
+Instance.new("UICorner", WebhookInput).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", WebhookInput).Color = THEME.Border
+
+WebhookInput.FocusLost:Connect(function() WebhookURL = WebhookInput.Text end)
+
+local TWEEN_IN = TweenInfo.new(0.8, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+MainCanvas.Size = UDim2.new(0, 480, 0, 280) 
+TweenService:Create(MainCanvas, TWEEN_IN, {GroupTransparency = 0, Size = UDim2.new(0, 520, 0, 310)}):Play()
+
+MainToggleBtn.MouseButton1Click:Connect(function()
+    States.Farming = not States.Farming
+    local tInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+    
+    if States.Farming then
+        TweenService:Create(ToggleKnob, tInfo, {Position = UDim2.new(1, -35, 0.5, -15), BackgroundColor3 = Color3.fromRGB(255,255,255)}):Play()
+        TweenService:Create(ToggleBg, tInfo, {BackgroundColor3 = THEME.AccentDim}):Play()
+        TweenService:Create(ToggleStroke, tInfo, {Color = THEME.Accent}):Play()
+        StatusLabel.Text = "SYSTEM ACTIVE"
+        StatusLabel.TextColor3 = THEME.Accent
+        Log("Initiating combat protocols...")
+    else
+        TweenService:Create(ToggleKnob, tInfo, {Position = UDim2.new(0, 5, 0.5, -15), BackgroundColor3 = THEME.TextMuted}):Play()
+        TweenService:Create(ToggleBg, tInfo, {BackgroundColor3 = THEME.CardBg}):Play()
+        TweenService:Create(ToggleStroke, tInfo, {Color = THEME.Border}):Play()
+        StatusLabel.Text = "SYSTEM IDLE"
+        StatusLabel.TextColor3 = THEME.TextMuted
+        Log("Protocols suspended.")
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then player.Character.HumanoidRootPart.Anchored = false end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(5) do
+        if States.AutoDeposit then
+            pcall(function() ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ItemStorage"):FireServer("Deposit", "Pouch") end)
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.2) do
+        if States.AutoRedeem and player.Character then
+            local char = player.Character
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            local backpack = player:FindFirstChild("Backpack")
+            local inv = player:FindFirstChild("Data") and player.Data:FindFirstChild("Inventory")
+
+            if hum then
+                for fmtName, _ in pairs(TargetItems) do
+                    local found = false
+
+                    for _, item in ipairs(char:GetChildren()) do
+                        if item:IsA("Tool") and formatString(item.Name) == fmtName then
+                            item:Activate()
+                            VirtualUser:ClickButton1(Vector2.new(0,0))
+                            found = true; break 
+                        end
+                    end
+
+                    if not found and backpack then
+                        for _, item in ipairs(backpack:GetChildren()) do
+                            if item:IsA("Tool") and formatString(item.Name) == fmtName then
+                                hum:EquipTool(item)
+                                task.wait(0.2); item:Activate(); VirtualUser:ClickButton1(Vector2.new(0,0))
+                                found = true; break 
+                            end
+                        end
+                    end
+
+                    if not found and inv then
+                        for _, itm in ipairs(inv:GetChildren()) do
+                            if formatString(itm.Name) == fmtName then
+                                local qty = itm:FindFirstChild("Quantity")
+                                if qty and qty.Value > 0 then
+                                    pcall(function() ReplicatedStorage.Remotes.ItemStorage:FireServer("Withdraw", itm.Name, 1) end)
+                                    task.wait(0.2)
+                                end
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    local req = request or http_request or (http and http.request) or syn.request
+    while task.wait(60) do
+        if States.Webhook and WebhookURL ~= "" and req then
+            local magicMark, coins = 0, 0
+            local mmObj = player:FindFirstChild("MagicMarkProgression", true)
+            if mmObj then magicMark = mmObj.Value end
+            local coinObj = player:FindFirstChild("Coins", true)
+            if coinObj then coins = coinObj.Value end
+            
+            local data = {
+                ["embeds"] = {{
+                    ["title"] = "Cyanide's Auto Bounty - Live Uplink",
+                    ["color"] = tonumber("0x00E6FF"),
+                    ["fields"] = {
+                        {["name"] = "💰 Coins", ["value"] = tostring(coins), ["inline"] = true},
+                        {["name"] = "🔮 Magic Mark", ["value"] = tostring(magicMark), ["inline"] = true},
+                        {["name"] = "🏆 Bounties Done", ["value"] = tostring(bountiesCompleted), ["inline"] = false}
+                    },
+                    ["footer"] = {["text"] = "Cyanide Secure Systems"}
+                }}
+            }
+            pcall(function()
+                req({Url = WebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(data)})
+            end)
+        end
+    end
+end)
+
+local TWEEN_DURATION = 3 
+local CHEST_MAX_DISTANCE = 100 
+local LAVA_COORDS = CFrame.new(-3885, 433, -4056)
+local TIMEOUT_MAX = 10
+
+local Bounties = {"Monster Sighting", "Winter Outbreak"}
+local CurrentBountyIndex = 1
+local BOUNTY_NAME = Bounties[CurrentBountyIndex]
+local MARKER_NAME = BOUNTY_NAME .. "MissionMarker"
+
+TargetVal.Text = string.upper(BOUNTY_NAME)
+
+local function toggleBountyTarget()
+    CurrentBountyIndex = CurrentBountyIndex == 1 and 2 or 1
+    BOUNTY_NAME = Bounties[CurrentBountyIndex]
+    MARKER_NAME = BOUNTY_NAME .. "MissionMarker"
+    TargetVal.Text = string.upper(BOUNTY_NAME)
+    Log("Shifted target focus.")
+end
+
+local function deleteLava(instance)
+    if instance:IsA("BasePart") and string.find(string.lower(instance.Name), "lava") then instance:Destroy() end
+end
+for _, obj in ipairs(workspace:GetDescendants()) do deleteLava(obj) end
+workspace.DescendantAdded:Connect(function(newObj) task.wait(0.1) deleteLava(newObj) end)
+
+local fakeFloor = workspace:FindFirstChild("InvisibleSafeFloor") or Instance.new("Part")
+fakeFloor.Name = "InvisibleSafeFloor" 
+fakeFloor.Size = Vector3.new(40, 2, 40)
+fakeFloor.Position = LAVA_COORDS.Position - Vector3.new(0, 4, 0)
+fakeFloor.Anchored = true
+fakeFloor.Transparency = 1 
+fakeFloor.CanCollide = true
+fakeFloor.Parent = workspace
+
+local function hasBountyPoster(char)
+    local backpack = player:FindFirstChild("Backpack")
+    return (backpack and backpack:FindFirstChild("Bounty Poster")) or (char and char:FindFirstChild("Bounty Poster"))
+end
+
+local function getLocalEventChest(root)
+    for _, obj in ipairs(workspace.Interactables:GetChildren()) do
+        if obj.Name == "Event Chest" and (obj:GetPivot().Position - root.Position).Magnitude <= CHEST_MAX_DISTANCE then return obj end
+    end
+    return nil
+end
+
+local function handleDroppedLoot(root, humanoid)
+    local foundLoot = false
+    for _, obj in ipairs(workspace.Interactables:GetChildren()) do
+        if obj:FindFirstChild("LootAppear") or obj:FindFirstChild("LootTween") then
+            local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt and prompt.Enabled then
+                foundLoot = true
+                local origin = prompt.Parent:IsA("Attachment") and prompt.Parent.WorldPosition or prompt.Parent.Position
+                if (root.Position - origin).Magnitude > prompt.MaxActivationDistance then
+                    root.Anchored = false
+                    root.CFrame = CFrame.new(origin + Vector3.new(0, 1.5, 0))
+                    humanoid:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+                    task.wait(0.2) 
+                end
+                while prompt and prompt.Parent and prompt.Enabled do
+                    if fireproximityprompt then fireproximityprompt(prompt) end
+                    task.wait(0.05) 
+                end
+            end
+        end
+    end
+    return foundLoot
+end
+
+local wasPosterActive = false
+local phase4Timeout = 0 
+
+task.spawn(function()
+    while task.wait(0.1) do
+        if not States.Farming then wasPosterActive = false; phase4Timeout = 0; continue end
+
+        local char = player.Character
+        if not char then continue end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local humanoid = char:FindFirstChild("Humanoid")
+        if not root or not humanoid then continue end
+
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+        humanoid.StateChanged:Connect(function(_, newState)
+            if (newState == Enum.HumanoidStateType.Freefall or newState == Enum.HumanoidStateType.FallingDown) and States.Farming then
+                humanoid:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+            end
+        end)
+
+        if handleDroppedLoot(root, humanoid) then phase4Timeout = 0; continue end
+
+        local chest = getLocalEventChest(root)
+        local posterActive = hasBountyPoster(char)
+        local marker = workspace:FindFirstChild(MARKER_NAME)
+        
+        if wasPosterActive and not posterActive then
+            bountiesCompleted = bountiesCompleted + 1
+            StatsVal.Text = "Completed: " .. tostring(bountiesCompleted)
+            phase4Timeout = 0
+            Log("Target eliminated successfully.")
+            TweenService:Create(TargetCard, TweenInfo.new(0.3), {BackgroundColor3 = THEME.AccentDim}):Play()
+            task.delay(0.4, function() TweenService:Create(TargetCard, TweenInfo.new(0.5), {BackgroundColor3 = THEME.CardBg}):Play() end)
+            task.wait(1)
+            toggleBountyTarget()
+        end
+        wasPosterActive = posterActive
+
+        if chest then
+            Log("Intercepting Event Chest...")
+            task.wait(1)
+            local prompt = chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt then
+                local origin = prompt.Parent:IsA("Attachment") and prompt.Parent.WorldPosition or prompt.Parent.Position
+                if (root.Position - origin).Magnitude > prompt.MaxActivationDistance then
+                    root.Anchored = false
+                    root.CFrame = CFrame.new(origin + Vector3.new(0, 1.5, 0))
+                    task.wait(0.25)
+                end
+                while prompt and prompt.Enabled and chest.Parent do
+                    if fireproximityprompt then fireproximityprompt(prompt) end; task.wait(0.05)
+                end
+            end
+            task.wait(1)
+            if chest.Parent then chest:Destroy() end
+            phase4Timeout = 0; continue 
+        end
+
+        if not posterActive then
+            phase4Timeout = 0; root.Anchored = false 
+            if (root.Position - LAVA_COORDS.Position).Magnitude > 15 then root.CFrame = LAVA_COORDS end
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game); task.wait(0.1)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
+            pcall(function() ReplicatedStorage.Remotes:WaitForChild("TakeBounty"):FireServer("PVE", BOUNTY_NAME) end)
+            Log("Awaiting assignment: " .. BOUNTY_NAME); task.wait(1.5) 
+
+        elseif posterActive and marker then
+            phase4Timeout = 0; Log("Tethering target to core...")
+            root.Anchored = true; root.CFrame = LAVA_COORDS
+            humanoid:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+            local tInfo = TweenInfo.new(TWEEN_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+            local proxy
+            if marker:IsA("BasePart") then
+                TweenService:Create(marker, tInfo, {CFrame = root.CFrame}):Play()
+            elseif marker:IsA("Model") then
+                proxy = Instance.new("CFrameValue"); proxy.Value = marker:GetPivot()
+                proxy.Changed:Connect(function(c) marker:PivotTo(c) end)
+                TweenService:Create(proxy, tInfo, {Value = root.CFrame}):Play()
+                task.delay(TWEEN_DURATION, function() if proxy then proxy:Destroy() end end)
+            end
+            while marker and marker.Parent == workspace and States.Farming do task.wait(0.1) end
+            
+        elseif posterActive and not marker then
+            Log(string.format("Awaiting kill... [%.1fs / 10s]", phase4Timeout))
+            root.Anchored = true; humanoid:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+            phase4Timeout = phase4Timeout + 0.1 
+            if phase4Timeout >= TIMEOUT_MAX then
+                Log("FAILSAFE: Target timed out. Purging.")
+                TweenService:Create(MainCanvas, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(30, 10, 15)}):Play()
+                pcall(function() ReplicatedStorage.Remotes:FindFirstChild("TakeBounty"):FireServer("ClearPVE") end)
+                phase4Timeout = 0
+                task.delay(0.5, function() TweenService:Create(MainCanvas, TweenInfo.new(0.5), {BackgroundColor3 = THEME.Background}):Play() end)
+                toggleBountyTarget(); task.wait(1)
+            end
+        end
+    end
+end)
