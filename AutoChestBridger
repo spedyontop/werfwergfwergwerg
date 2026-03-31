@@ -279,12 +279,15 @@ task.spawn(function()
     if remotes then
         local notificationEvent = remotes:WaitForChild("NotificationEvent", 10)
         
-        if notificationEvent then
+if notificationEvent then
             notificationEvent.OnClientEvent:Connect(function(message)
-                if isFarming and type(message) == "string" and string.find(message, "Need at least 3 players to open!") then
-                    print("[cyanide] 3-player requirement hit. Hopping servers...")
-                    ServerHop()
-                    task.wait(10)
+                if isFarming and type(message) == "string" then
+                    -- Use %d+ as a pattern to match any number of digits in the string
+                    if string.find(message, "Need at least 3 players to open!") or string.match(message, "Chests unlocking in %d+ mins!") then
+                        print("[cyanide] Chest lock or timer hit. Hopping servers...")
+                        ServerHop()
+                        task.wait(10)
+                    end
                 end
             end)
         end
